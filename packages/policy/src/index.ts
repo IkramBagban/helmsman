@@ -1,4 +1,4 @@
-﻿import { PolicyDecision, ToolExecutionRequest, RiskTier } from "@helmsman/shared";
+﻿import type { PolicyDecision, ToolExecutionRequest, RiskTier } from "@helmsman/shared";
 
 export interface PolicyEngine {
   evaluate(request: ToolExecutionRequest, riskTier: RiskTier): Promise<PolicyDecision>;

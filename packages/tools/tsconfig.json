@@ -14,6 +14,9 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
 
+    // Bun runtime types (for Bun.spawn, etc.)
+    "types": ["bun-types"],
+
     // Best practices
     "strict": true,
     "skipLibCheck": true,

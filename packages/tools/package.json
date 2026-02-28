@@ -8,5 +8,8 @@
   },
   "dependencies": {
     "@helmsman/shared": "*"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.10"
   }
 }

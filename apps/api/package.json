@@ -15,7 +15,6 @@
     "@helmsman/policy": "workspace:*",
     "@helmsman/shared": "*",
     "@helmsman/tools": "workspace:*",
-    "@helmsman/tools-aws": "workspace:*",
     "express": "^5.2.1",
     "ioredis": "^5.10.0"
   },

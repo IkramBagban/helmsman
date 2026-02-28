@@ -5,9 +5,10 @@ import {
   RiskTier,
   ToolExecutionRequest,
 } from "@helmsman/shared";
-import type { ToolRegistry } from "@helmsman/tools";
+import { ShellExecuteTool, type ToolRegistry } from "@helmsman/tools";
 
 import { LLMProvider } from "../llm/provider.js";
+import { buildSystemPrompt } from "./system-prompt.js";
 
 export interface AgentService {
   handleMessage(message: NormalizedMessage): Promise<AgentResponse>;
@@ -26,19 +27,30 @@ interface ParsedToolCall {
   readonly parameters: Record<string, unknown>;
 }
 
-interface S3BucketLike {
-  readonly Name?: unknown;
-  readonly CreationDate?: unknown;
-}
+const AMBIGUOUS_CONFIRMATION_PATTERN = /^(yes|y|ok|okay|sure|go ahead|proceed|do it)$/i;
 
-const tryParseToolCall = (text: string): ParsedToolCall | null => {
-  const trimmed = text.trim();
-  const jsonCandidate = trimmed.startsWith("```")
-    ? trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")
-    : trimmed;
+const isAmbiguousConfirmation = (text: string): boolean => {
+  return AMBIGUOUS_CONFIRMATION_PATTERN.test(text.trim());
+};
 
+const TOOL_ARTIFACT_PATTERN = /("type"\s*:\s*"tool_call"|"toolName"\s*:\s*"shell\.execute"|```(?:json|tool_code)?)/i;
+
+const sanitizeForUser = (text: string): string => {
+  const withoutFencedToolBlocks = text
+    .replace(/```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi, "")
+    .replace(/\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}/gi, "")
+    .trim();
+
+  if (!withoutFencedToolBlocks || TOOL_ARTIFACT_PATTERN.test(withoutFencedToolBlocks)) {
+    return "I can help with that. Tell me what infrastructure detail you want to check, and I’ll return a clean summary.";
+  }
+
+  return withoutFencedToolBlocks;
+};
+
+const parseToolCallCandidate = (candidate: string): ParsedToolCall | null => {
   try {
-    const parsed = JSON.parse(jsonCandidate) as {
+    const parsed = JSON.parse(candidate) as {
       toolName?: unknown;
       parameters?: unknown;
       type?: unknown;
@@ -65,71 +77,29 @@ const tryParseToolCall = (text: string): ParsedToolCall | null => {
   }
 };
 
-const formatDate = (value: string): string => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
+const tryParseToolCall = (text: string): ParsedToolCall | null => {
+  const trimmed = text.trim();
+  const candidates: string[] = [trimmed];
+
+  if (trimmed.startsWith("```")) {
+    candidates.push(trimmed.replace(/^```(?:[a-zA-Z_-]+)?\s*/i, "").replace(/\s*```$/, ""));
   }
 
-  return date.toISOString().slice(0, 10);
-};
-
-const summarizeS3Buckets = (rawOutput: string): string | null => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawOutput);
-  } catch {
-    return null;
+  const fencedBlockMatch = trimmed.match(/```(?:[a-zA-Z_-]+)?\s*([\s\S]*?)\s*```/);
+  if (fencedBlockMatch?.[1]) {
+    candidates.push(fencedBlockMatch[1]);
   }
 
-  if (!Array.isArray(parsed)) {
-    return null;
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (objectMatch?.[0]) {
+    candidates.push(objectMatch[0]);
   }
 
-  const buckets = parsed
-    .filter((item): item is S3BucketLike => typeof item === "object" && item !== null)
-    .map((item) => ({
-      name: typeof item.Name === "string" ? item.Name : "unknown-bucket",
-      creationDate: typeof item.CreationDate === "string" ? item.CreationDate : "unknown",
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  if (buckets.length === 0) {
-    return "I checked your account and no S3 buckets were found.";
-  }
-
-  const preview = buckets
-    .slice(0, 8)
-    .map((bucket) => `- ${bucket.name} (created ${formatDate(bucket.creationDate)})`)
-    .join("\n");
-
-  const infraBuckets = buckets.filter((bucket) =>
-    /cdk|serverless|deployment|assets/i.test(bucket.name),
-  );
-
-  const infraNote = infraBuckets.length > 0
-    ? `\n\nObservation: ${infraBuckets.length} bucket(s) look infrastructure-managed (CDK/Serverless/deployment).`
-    : "";
-
-  const remainder = buckets.length > 8
-    ? `\n\n…and ${buckets.length - 8} more bucket(s).`
-    : "";
-
-  return [
-    `You currently have ${buckets.length} S3 bucket(s).`,
-    "",
-    "Top buckets:",
-    preview,
-    infraNote,
-    remainder,
-    "",
-    "Next step: If you want, I can flag buckets that may need lifecycle, encryption, or public-access review.",
-  ].join("\n").trim();
-};
-
-const summarizeKnownToolOutput = (toolName: string, rawOutput: string): string | null => {
-  if (toolName === "aws:s3:ListBuckets") {
-    return summarizeS3Buckets(rawOutput);
+  for (const candidate of candidates) {
+    const parsed = parseToolCallCandidate(candidate);
+    if (parsed) {
+      return parsed;
+    }
   }
 
   return null;
@@ -163,13 +133,10 @@ export class HelmsmanAgentService implements AgentService {
     });
 
     const toolDefinitions = this.toolRegistry?.getAllDefinitions() ?? [];
-    const toolPrompt = toolDefinitions.length > 0
-      ? `Available tools (JSON array): ${JSON.stringify(toolDefinitions)}. If a tool is required, respond with ONLY strict JSON: {"type":"tool_call","toolName":"<name>","parameters":{}}.`
-      : "No tools are available.";
+    const systemPrompt = buildSystemPrompt(JSON.stringify(toolDefinitions));
 
     const llmResult = await this.llmProvider.generate({
-      systemPrompt:
-        `You are Helmsman, a helpful DevOps assistant. Keep responses concise, safe, and actionable. ${toolPrompt}`,
+      systemPrompt,
       messages: [{ role: "user", content: message.text }],
     });
 
@@ -186,7 +153,18 @@ export class HelmsmanAgentService implements AgentService {
       return {
         correlationId: message.correlationId,
         status: "success",
-        text: llmResult.text,
+        text: sanitizeForUser(llmResult.text),
+        metadata: {
+          model: llmResult.model,
+        },
+      };
+    }
+
+    if (parsedToolCall.toolName === "shell.execute" && isAmbiguousConfirmation(message.text)) {
+      return {
+        correlationId: message.correlationId,
+        status: "success",
+        text: "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').",
         metadata: {
           model: llmResult.model,
         },
@@ -212,7 +190,12 @@ export class HelmsmanAgentService implements AgentService {
       userId: message.userId,
     };
 
-    const riskTier: RiskTier = tool.definition.riskTier;
+    // Dynamic risk classification: if the tool supports it (e.g. ShellExecuteTool),
+    // classify based on the actual command content rather than static definition.
+    let riskTier: RiskTier = tool.definition.riskTier;
+    if (tool instanceof ShellExecuteTool && typeof parsedToolCall.parameters.command === "string") {
+      riskTier = tool.classifyRisk(parsedToolCall.parameters.command);
+    }
     const policyDecision: PolicyDecision = this.policyEngine
       ? await this.policyEngine.evaluate(policyRequest, riskTier)
       : { action: "allow" };
@@ -270,36 +253,41 @@ export class HelmsmanAgentService implements AgentService {
       };
     }
 
-    const deterministicSummary = summarizeKnownToolOutput(parsedToolCall.toolName, toolResult.output);
-    if (deterministicSummary) {
-      return {
-        correlationId: message.correlationId,
-        status: "success",
-        text: deterministicSummary,
-        metadata: {
-          model: llmResult.model,
-          toolName: parsedToolCall.toolName,
-          summarySource: "deterministic",
-        },
+    // Always use LLM to format output naturally — no deterministic formatters needed.
+    // The rich system prompt ensures the LLM knows how to summarize CLI output.
+    let finalAnswer: { text: string; model: string };
+    try {
+      finalAnswer = await this.llmProvider.generate({
+        systemPrompt:
+          "You are Helmsman. Summarize tool output in plain operator language. Format as: 1) What I found, 2) Why it matters, 3) Recommended next step. Avoid raw JSON unless explicitly requested.",
+        messages: [
+          { role: "user", content: `User request: ${message.text}` },
+          {
+            role: "assistant",
+            content: `Tool ${parsedToolCall.toolName} executed command and returned:\n${toolResult.output}`,
+          },
+        ],
+      });
+    } catch {
+      finalAnswer = {
+        model: llmResult.model,
+        text: [
+          "1) What I found:",
+          toolResult.output.slice(0, 1500),
+          "",
+          "2) Why it matters:",
+          "This is the direct output from the executed command.",
+          "",
+          "3) Recommended next step:",
+          "If you want, I can refine this into a concise table or run a more targeted query.",
+        ].join("\n"),
       };
     }
-
-    const finalAnswer = await this.llmProvider.generate({
-      systemPrompt:
-        "You are Helmsman. Summarize tool output in plain operator language. Format exactly as: 1) What I found, 2) Why it matters, 3) Recommended next step. Avoid raw JSON unless explicitly requested.",
-      messages: [
-        { role: "user", content: `User request: ${message.text}` },
-        {
-          role: "assistant",
-          content: `Tool ${parsedToolCall.toolName} output: ${toolResult.output}`,
-        },
-      ],
-    });
 
     return {
       correlationId: message.correlationId,
       status: "success",
-      text: finalAnswer.text,
+      text: sanitizeForUser(finalAnswer.text),
       metadata: {
         model: finalAnswer.model,
         toolName: parsedToolCall.toolName,

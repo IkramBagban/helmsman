@@ -1,4 +1,4 @@
-﻿import { ToolDefinition, ToolExecutionRequest, ToolExecutionResult } from "@helmsman/shared";
+﻿import type { ToolDefinition, ToolExecutionRequest, ToolExecutionResult } from "@helmsman/shared";
 
 export interface ToolInstance {
   definition: ToolDefinition;
@@ -20,3 +20,15 @@ export class ToolRegistry {
     return Array.from(this.tools.values()).map(t => t.definition);
   }
 }
+
+// Shell safety & executor
+export { ShellExecuteTool } from "./shell-execute.js";
+export {
+  parseCommand,
+  validateCommand,
+  classifyCommandRisk,
+  ALLOWED_BINARIES,
+  BLOCKED_PATTERNS,
+  type ParsedCommand,
+  type CommandValidationResult,
+} from "./shell-safety.js";

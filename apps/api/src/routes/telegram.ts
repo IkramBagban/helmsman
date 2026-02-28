@@ -4,8 +4,7 @@ import { HelmsmanAgentService, createLLMProvider } from "@helmsman/agent-core";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
 import { ConsoleAuditService } from "@helmsman/audit";
 import { DefaultPolicyEngine } from "@helmsman/policy";
-import { ListS3BucketsTool, GenericEc2Tool } from "@helmsman/tools-aws";
-import { ToolRegistry } from "@helmsman/tools";
+import { ShellExecuteTool, ToolRegistry } from "@helmsman/tools";
 
 import type { ApiEnv } from "../config.js";
 import { getCommandResponse } from "../telegram/commands.js";
@@ -22,94 +21,17 @@ const truncateForTelegram = (text: string, maxLength: number = 3000): string => 
   return `${text.slice(0, maxLength)}\n\n…(truncated)`;
 };
 
-const formatDate = (value: string): string => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
+const sanitizeAssistantText = (text: string): string => {
+  const cleaned = text
+    .replace(/```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi, "")
+    .replace(/\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}/gi, "")
+    .trim();
+
+  if (!cleaned) {
+    return "I completed your request and can provide a clean summary. Tell me which detail you want first.";
   }
 
-  return date.toISOString().slice(0, 10);
-};
-
-const summarizeS3Buckets = (rawOutput: string): string | null => {
-  try {
-    const parsed = JSON.parse(rawOutput) as Array<{ Name?: string; CreationDate?: string }>;
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
-
-    const buckets = parsed
-      .map((bucket) => ({
-        name: typeof bucket.Name === "string" ? bucket.Name : "unknown-bucket",
-        creationDate: typeof bucket.CreationDate === "string" ? bucket.CreationDate : "unknown",
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    if (buckets.length === 0) {
-      return "I checked your account and no S3 buckets were found.";
-    }
-
-    const preview = buckets
-      .slice(0, 8)
-      .map((bucket) => `- ${bucket.name} (created ${formatDate(bucket.creationDate)})`)
-      .join("\n");
-
-    const infraCount = buckets.filter((bucket) => /cdk|serverless|deployment|assets/i.test(bucket.name)).length;
-    const extra = buckets.length > 8 ? `\n\n…and ${buckets.length - 8} more bucket(s).` : "";
-    const infra = infraCount > 0
-      ? `\n\nObservation: ${infraCount} bucket(s) appear infra-managed (CDK/Serverless/deployment).`
-      : "";
-
-    return [
-      `You currently have ${buckets.length} S3 bucket(s).`,
-      "",
-      "Top buckets:",
-      preview,
-      infra,
-      extra,
-      "",
-      "Next step: I can run a security and lifecycle review on these buckets if you want.",
-    ].join("\n").trim();
-  } catch {
-    return null;
-  }
-};
-
-const summarizeKnownToolOutput = (toolName: string, rawOutput: string): string | null => {
-  if (toolName === "aws:s3:ListBuckets") {
-    return summarizeS3Buckets(rawOutput);
-  }
-
-  return null;
-};
-
-const fallbackHumanSummary = (toolName: string, rawOutput: string): string => {
-  const deterministic = summarizeKnownToolOutput(toolName, rawOutput);
-  if (deterministic) {
-    return truncateForTelegram(deterministic);
-  }
-
-  try {
-    const parsed = JSON.parse(rawOutput) as unknown;
-
-    if (Array.isArray(parsed)) {
-      const preview = parsed.slice(0, 5).map((item, index) => `- ${index + 1}. ${JSON.stringify(item)}`).join("\n");
-      return truncateForTelegram(
-        `✅ Executed ${toolName}\n\nFound ${parsed.length} result(s).\n\nTop results:\n${preview}`,
-      );
-    }
-
-    if (typeof parsed === "object" && parsed !== null) {
-      const keys = Object.keys(parsed as Record<string, unknown>);
-      return truncateForTelegram(
-        `✅ Executed ${toolName}\n\nReceived structured data with ${keys.length} field(s): ${keys.slice(0, 8).join(", ")}`,
-      );
-    }
-  } catch {
-    // no-op, fallback to raw text below
-  }
-
-  return truncateForTelegram(`✅ Executed ${toolName}\n\n${rawOutput}`);
+  return cleaned;
 };
 
 export interface TelegramWebhookHandler {
@@ -142,8 +64,7 @@ export const createTelegramWebhookHandler = (
   const sender = dependencies?.sender ?? new TelegramSender(env.telegramBotToken);
 
   const registry = new ToolRegistry();
-  registry.register(new ListS3BucketsTool() as any);
-  registry.register(new GenericEc2Tool() as any);
+  registry.register(new ShellExecuteTool());
 
   const approvalStore = new InMemoryApprovalStore();
   const policyEngine = new DefaultPolicyEngine();
@@ -250,24 +171,19 @@ export const createTelegramWebhookHandler = (
 
           let humanSummary: string;
           try {
-            const deterministic = summarizeKnownToolOutput(pending.toolName, toolResult.output);
-            if (deterministic) {
-              humanSummary = truncateForTelegram(deterministic);
-            } else {
-              const summary = await approvalSummaryProvider.generate({
-                systemPrompt:
-                  "You are Helmsman. Convert tool output into clear operator language. Format as: 1) What I found, 2) Why it matters, 3) Recommended next step. Avoid raw JSON unless requested.",
-                messages: [
-                  {
-                    role: "user",
-                    content: `Tool: ${pending.toolName}\n\nRaw output:\n${toolResult.output}`,
-                  },
-                ],
-              });
-              humanSummary = truncateForTelegram(summary.text);
-            }
+            const summary = await approvalSummaryProvider.generate({
+              systemPrompt:
+                "You are Helmsman. Convert tool output into clear operator language. Format as: 1) What I found, 2) Why it matters, 3) Recommended next step. Avoid raw JSON unless requested.",
+              messages: [
+                {
+                  role: "user",
+                  content: `Tool: ${pending.toolName}\n\nRaw output:\n${toolResult.output}`,
+                },
+              ],
+            });
+            humanSummary = truncateForTelegram(sanitizeAssistantText(summary.text));
           } catch {
-            humanSummary = fallbackHumanSummary(pending.toolName, toolResult.output);
+            humanSummary = truncateForTelegram(sanitizeAssistantText(`Executed ${pending.toolName}\n\n${toolResult.output}`));
           }
 
           await sender.sendResponse(chatId, humanSummary);
@@ -317,7 +233,7 @@ export const createTelegramWebhookHandler = (
             }
           }
 
-          await sender.sendResponse(chatId, agentResponse.text);
+          await sender.sendResponse(chatId, sanitizeAssistantText(agentResponse.text));
         } finally {
           clearInterval(typingTimer);
         }
