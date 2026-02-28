@@ -248,6 +248,11 @@ const ApiEnvSchema = z.object({
   PORT: z.coerce.number().default(3000),
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(16), // for webhook verification
+  LLM_PROVIDER: z.enum(["gemini", "openai", "echo"]).default("gemini"),
+  GEMINI_API_KEY: z.string().optional(),
+  GOOGLE_API_KEY: z.string().optional(),
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 ```
@@ -272,10 +277,10 @@ const ApiEnvSchema = z.object({
 ### Integration Tests
 | Test | What |
 |------|------|
-| `telegram.test.ts` | Full webhook → normalize → mock agent → reply flow |
-| `telegram.test.ts` | Duplicate update returns 200 without processing |
-| `telegram.test.ts` | Invalid payload returns 200 (don't retry) |
-| `health.test.ts` | GET /health returns 200 |
+| `routes/telegram-webhook.test.ts` | Full webhook → normalize → mock agent → reply flow |
+| `routes/telegram-webhook.test.ts` | Duplicate update returns 200 without processing |
+| `routes/telegram-webhook.test.ts` | Invalid payload returns 200 (don't retry) |
+| `routes/telegram-webhook.test.ts` | Error middleware returns 200 for webhook failures |
 
 ---
 

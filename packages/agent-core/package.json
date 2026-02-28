@@ -16,6 +16,9 @@
     "typescript": "5.9.2"
   },
   "dependencies": {
-    "@helmsman/shared": "*"
+    "@helmsman/audit": "workspace:*",
+    "@helmsman/policy": "workspace:*",
+    "@helmsman/shared": "*",
+    "@helmsman/tools": "workspace:*"
   }
 }

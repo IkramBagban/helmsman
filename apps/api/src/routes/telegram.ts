@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { HelmsmanAgentService, createLLMProvider } from "@helmsman/agent-core";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
+import { ConsoleAuditService } from "@helmsman/audit";
+import { DefaultPolicyEngine } from "@helmsman/policy";
 
 import type { ApiEnv } from "../config.js";
 import { getCommandResponse } from "../telegram/commands.js";
-import { InMemoryDedupStore, type DedupStore } from "../telegram/dedup.js";
+import { type DedupStore } from "../telegram/dedup.js";
 import { parseTelegramUpdate } from "../telegram/parser.js";
 import { TelegramSender } from "../telegram/sender.js";
 
@@ -32,7 +34,10 @@ export const createTelegramWebhookHandler = (
   env: ApiEnv,
   dependencies?: TelegramWebhookDependencies,
 ): TelegramWebhookHandler => {
-  const dedupStore = dependencies?.dedupStore ?? new InMemoryDedupStore();
+  if (!dependencies?.dedupStore) {
+    throw new Error("Telegram dedupStore is required but was not provided in dependencies.");
+  }
+  const dedupStore = dependencies.dedupStore;
   const sender = dependencies?.sender ?? new TelegramSender(env.telegramBotToken);
   const agentService = dependencies?.agentService ?? new HelmsmanAgentService({
     llmProvider: createLLMProvider({
@@ -42,6 +47,8 @@ export const createTelegramWebhookHandler = (
       geminiApiKey: env.geminiApiKey,
       geminiBaseUrl: env.geminiBaseUrl,
     }),
+    policyEngine: new DefaultPolicyEngine(),
+    auditService: new ConsoleAuditService(),
   });
 
   return {

@@ -1,5 +1,4 @@
-import { describe, expect, it } from "bun:test";
-
+﻿import { describe, expect, it } from "bun:test";
 import { InMemoryDedupStore, RedisDedupStore } from "../../src/telegram/dedup.js";
 
 describe("InMemoryDedupStore", () => {
@@ -22,11 +21,31 @@ describe("InMemoryDedupStore", () => {
 });
 
 describe("RedisDedupStore", () => {
-  it("should throw until implemented", async () => {
-    const dedup = new RedisDedupStore();
+  it("should deduplicate using mocked redis", async () => {
+    const mockRedis = {
+      set: async (key: string) => {
+        if (key.includes("duplicate")) return null;
+        return "OK";
+      },
+    } as any;
 
-    await expect(dedup.isDuplicate(1)).rejects.toMatchObject({
-      code: "DEDUP_NOT_IMPLEMENTED",
-    });
+    const dedup = new RedisDedupStore(mockRedis);
+
+    expect(await dedup.isDuplicate(123)).toBe(false); // result "OK" => false
+    
+    const mockRedisDup = {
+        set: async () => null
+    } as any;
+    const dedupDup = new RedisDedupStore(mockRedisDup);
+    expect(await dedupDup.isDuplicate(123)).toBe(true); // result null => true
+  });
+
+  it("should fallback to false on redis error", async () => {
+    const mockRedis = {
+      set: async () => { throw new Error("Redis connection failure"); },
+    } as any;
+
+    const dedup = new RedisDedupStore(mockRedis);
+    expect(await dedup.isDuplicate(1)).toBe(false);
   });
 });

@@ -11,12 +11,17 @@
   },
   "dependencies": {
     "@helmsman/agent-core": "*",
+    "@helmsman/audit": "workspace:*",
+    "@helmsman/policy": "workspace:*",
     "@helmsman/shared": "*",
-    "express": "^5.2.1"
+    "@helmsman/tools": "workspace:*",
+    "express": "^5.2.1",
+    "ioredis": "^5.10.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",
     "@types/express": "^5.0.6",
+    "@types/ioredis": "^5.0.0",
     "@types/node": "^22.15.3",
     "bun-types": "^1.3.10",
     "typescript": "5.9.2"

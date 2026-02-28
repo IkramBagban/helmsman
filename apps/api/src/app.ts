@@ -1,5 +1,6 @@
 import express from "express";
 import type { Request as ExpressRequest, Response as ExpressResponse } from "express";
+import { Redis } from "ioredis";
 
 import type { ApiEnv } from "./config.js";
 import { correlationIdMiddleware, CORRELATION_ID_HEADER } from "./middleware/correlation-id.js";
@@ -11,6 +12,7 @@ import {
   type TelegramWebhookDependencies,
   type TelegramWebhookHandler,
 } from "./routes/telegram.js";
+import { InMemoryDedupStore, RedisDedupStore } from "./telegram/dedup.js";
 
 export interface ApiAppDependencies {
   readonly telegram?: TelegramWebhookDependencies;
@@ -40,8 +42,25 @@ const toHeaderEntries = (request: ExpressRequest, response: ExpressResponse): [s
 
 export const createApp = (env: ApiEnv, dependencies?: ApiAppDependencies): express.Express => {
   const app = express();
+
+  let telegramDeps = dependencies?.telegram;
+  if (!telegramDeps?.dedupStore) {
+    if (env.redisUrl) {
+      const redis = new Redis(env.redisUrl);
+      telegramDeps = {
+        ...telegramDeps,
+        dedupStore: new RedisDedupStore(redis),
+      };
+    } else {
+      telegramDeps = {
+        ...telegramDeps,
+        dedupStore: new InMemoryDedupStore(),
+      };
+    }
+  }
+
   const telegramWebhookHandler = dependencies?.telegramWebhookHandler
-    ?? createTelegramWebhookHandler(env, dependencies?.telegram);
+    ?? createTelegramWebhookHandler(env, telegramDeps);
 
   app.use(correlationIdMiddleware());
   app.use(requestLoggingMiddleware());

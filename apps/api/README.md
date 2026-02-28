@@ -26,28 +26,77 @@ cp apps/api/.env.example apps/api/.env
 ## Run
 
 ```bash
+bun run dev
+```
+
+From repo root:
+
+```bash
 bun run dev --filter api
 ```
 
-## Webhook setup
+## Local Telegram Setup (Step-by-step)
+
+1. Create env file from example.
 
 ```bash
-curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
-  -d "url=https://<your-domain>/webhook/telegram" \
-  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+cp .env.example .env
 ```
 
-## Local Telegram test
+2. Fill required values in `.env`:
+   - `TELEGRAM_BOT_TOKEN` (from BotFather)
+   - `TELEGRAM_WEBHOOK_SECRET` (random string, 16+ chars)
+   - `LLM_PROVIDER=gemini`
+   - One Gemini key: `GEMINI_API_KEY` or `GOOGLE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`
 
-1. Start the API and expose it publicly (for example with ngrok).
+3. Start API locally.
+
 ```bash
-bun run dev --filter api
+bun run dev
+```
+
+4. Expose local API via HTTPS tunnel.
+
+```bash
 ngrok http 3000
 ```
-2. Register webhook with the public URL.
+
+5. Register Telegram webhook (replace URL with your tunnel URL).
+
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -d "url=https://<ngrok-id>.ngrok-free.app/webhook/telegram" \
   -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
 ```
-3. Send a Telegram message to your bot and verify API logs include `correlationId`, route, status, and duration.
+
+6. Verify webhook configuration.
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+Expected:
+- `"ok": true`
+- `result.url` matches your ngrok webhook URL
+- no recent delivery errors
+
+7. Test in Telegram.
+- Send `/start`
+- Send `/help`
+- Send a normal message and confirm LLM response arrives
+
+## Troubleshooting
+
+- `Bad Request: invalid webhook URL specified`
+  - Ensure URL starts with exactly one `https://`
+  - Ensure URL is public and reachable (not localhost)
+
+- Bot not responding
+  - Confirm app is running on port 3000
+  - Confirm ngrok tunnel is active
+  - Confirm `TELEGRAM_WEBHOOK_SECRET` exactly matches `secret_token` in `setWebhook`
+  - Check `getWebhookInfo` for `last_error_message`
+
+- Wrong LLM/provider errors
+  - If `LLM_PROVIDER=gemini`, set one of: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, or `GOOGLE_GENERATIVE_AI_API_KEY`
+  - If `LLM_PROVIDER=openai`, set `OPENAI_API_KEY`

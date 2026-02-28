@@ -10,6 +10,7 @@ export interface ApiEnv {
   readonly openAiBaseUrl?: string;
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;
+  readonly redisUrl?: string;
 }
 
 const getRequired = (name: string): string => {
@@ -55,6 +56,7 @@ export const getEnv = (): ApiEnv => {
       ?? process.env.GOOGLE_API_KEY
       ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
     geminiBaseUrl: process.env.GEMINI_BASE_URL,
+    redisUrl: process.env.REDIS_URL,
   };
 
   return env;

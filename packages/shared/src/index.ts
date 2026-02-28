@@ -36,6 +36,42 @@ export interface AgentResponse {
   readonly metadata?: Record<string, unknown>;
 }
 
+export type RiskTier = "read_only" | "low_risk" | "significant" | "destructive";
+
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Record<string, unknown>;
+  readonly riskTier: RiskTier;
+}
+
+export interface ToolExecutionRequest {
+  readonly toolName: string;
+  readonly parameters: Record<string, unknown>;
+  readonly correlationId: string;
+  readonly userId: string;
+}
+
+export interface ToolExecutionResult {
+  readonly success: boolean;
+  readonly output: string;
+  readonly error?: string;
+}
+
+export interface PolicyDecision {
+  readonly action: "allow" | "deny" | "require_approval";
+  readonly reason?: string;
+}
+
+export interface AuditEvent {
+  readonly id: string;
+  readonly timestamp: Date;
+  readonly type: "tool_execution" | "policy_check" | "user_approval";
+  readonly userId: string;
+  readonly correlationId: string;
+  readonly metadata: Record<string, unknown>;
+}
+
 export interface TelegramUpdate {
   readonly update_id: number;
   readonly message?: {
