@@ -17,7 +17,7 @@ Accept incoming Telegram messages via webhook, normalize them into a platform-ag
 
 ### Must Have
 - [ ] Receive Telegram webhook updates (messages, commands)
-- [ ] Validate webhook authenticity (Telegram bot token verification)
+- [ ] Validate webhook authenticity (verify `X-Telegram-Bot-Api-Secret-Token`)
 - [ ] Parse text messages into `NormalizedMessage` format
 - [ ] Deduplicate webhook retries (Telegram retries on slow responses)
 - [ ] Send typing indicator immediately on message receipt
@@ -105,19 +105,20 @@ export interface AgentResponse {
 
 ```
 Telegram Cloud
-    │
-    ▼  POST /webhook/telegram
+  │  setWebhook(url, secret_token)
+  │
+  ▼  POST /webhook/telegram (HTTPS)
 ┌──────────────────────────────────────┐
 │           apps/api                    │
 │                                       │
-│  1. Validate webhook (bot token)      │
+│  1. Validate webhook secret header     │
 │  2. Parse TelegramUpdate              │
 │  3. Dedup (check update_id / msg_id)  │
 │  4. Send typing indicator             │
 │  5. Normalize → NormalizedMessage     │
 │  6. Call agent-core.handleMessage()   │
 │  7. Format AgentResponse → Telegram   │
-│  8. Send reply via Telegram API       │
+│  8. Send reply via Bot API sendMessage │
 │  9. Return 200 OK                     │
 └──────────────────────────────────────┘
 ```
@@ -164,8 +165,26 @@ import { Bot, webhookCallback } from "grammy";
 const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
 // grammY handles all the Telegram-specific parsing
-app.post("/webhook/telegram", webhookCallback(bot, "express"));
+app.post(
+  "/webhook/telegram",
+  webhookCallback(bot, "express", {
+    secretToken: env.TELEGRAM_WEBHOOK_SECRET,
+  }),
+);
 ```
+
+At deploy time, configure Telegram to call your public HTTPS endpoint:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=https://<your-domain>/webhook/telegram" \
+  -d "secret_token=$TELEGRAM_WEBHOOK_SECRET"
+```
+
+Notes:
+- Telegram calls your API only after `setWebhook` is configured.
+- Endpoint must be publicly reachable over HTTPS.
+- API should return `200` quickly to avoid retries.
 
 ### Deduplication
 - Store last 1000 `update_id` values in memory (Map with TTL)
@@ -187,6 +206,11 @@ function isDuplicate(updateId: number): boolean {
 ### Typing Indicator
 - Send `sendChatAction("typing")` immediately when a message is received
 - Repeat every 4 seconds while agent is processing (Telegram typing indicator lasts 5s)
+
+### Sending Message to User
+- Use grammY `bot.api.sendMessage(chatId, text, options)` for normal replies
+- Use `bot.api.sendChatAction(chatId, "typing")` while processing
+- Split responses over 4096 chars into chunks and send sequentially
 
 ### Error Handling
 - If agent-core throws, catch and send a friendly error message:
