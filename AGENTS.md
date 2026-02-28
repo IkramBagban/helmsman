@@ -9,7 +9,7 @@
 
 A Jarvis-style AI execution agent. First vertical: DevOps — users talk to Helmsman in Telegram and it reasons about, plans, and executes infrastructure operations. Long-term: expands across domains.
 
-Full product context: `docs/README.md`, `docs/PRD.md`
+Full product context: `apps/docs/README.md`, `apps/docs/PRD.md`
 
 ---
 
@@ -31,7 +31,7 @@ packages/
   eslint-config/                ← (existing) shared ESLint config
   typescript-config/            ← (existing) shared tsconfig
   ui/                           ← (existing) shared UI components
-docs/
+apps/docs/
   PRD.md                        ← Product requirements, user stories, MVP scope
   STACK.md                      ← Tech stack decisions + package justifications
   CONVENTIONS.md                ← Coding patterns, TypeScript, Zod, Prisma, testing
@@ -66,7 +66,7 @@ docs/
 | Chat transport | Telegram Bot API (grammY) | Phase 1; Slack Phase 2 |
 | Cloud target | AWS | First-class; multi-cloud later |
 
-Full stack decisions: `docs/STACK.md`
+Full stack decisions: `apps/docs/STACK.md`
 
 ---
 
@@ -110,7 +110,7 @@ cd packages/shared && bun add zod
 
 ## Coding Conventions (Inline Summary)
 
-Full reference: `docs/CONVENTIONS.md`
+Full reference: `apps/docs/CONVENTIONS.md`
 
 ### TypeScript
 - Strict mode everywhere. No `any`. No `@ts-ignore`. No `@ts-nocheck`.
@@ -125,6 +125,11 @@ Full reference: `docs/CONVENTIONS.md`
 - Derive TypeScript types from Zod schemas: `type Foo = z.infer<typeof FooSchema>`.
 - Schemas live in the package that owns the contract, exported for consumers.
 
+### Environment Variables
+- Whenever you add or change any env var in a package, update that package's `.env.example` in the same PR.
+- `.env` files are local-only and must never be committed with real secrets.
+- Package READMEs must document required env vars and conditional requirements (e.g., provider-specific keys).
+
 ### Prisma
 - Schema lives in `packages/db/prisma/schema.prisma`.
 - Never import `@prisma/client` directly — import the typed client from `@helmsman/db`.
@@ -132,7 +137,8 @@ Full reference: `docs/CONVENTIONS.md`
 
 ### File Organization
 - One concept per file. Keep files under 300 LOC; split when larger.
-- Colocate tests: `foo.ts` → `foo.test.ts` in the same directory.
+- Keep tests in dedicated test folders, not side-by-side with source files.
+- Preferred pattern: `src/foo.ts` → `tests/foo.test.ts` (or `tests/<module>/foo.test.ts`).
 - Barrel exports via `index.ts` at package root only. No nested barrel files.
 - File naming: `kebab-case.ts` for files, `PascalCase` for types/classes, `camelCase` for functions/variables.
 
@@ -151,7 +157,7 @@ Full reference: `docs/CONVENTIONS.md`
 - Framework: Bun test runner (Vitest-compatible API).
 - Naming: `describe("functionName")` → `it("should do X when Y")`.
 - Mock external services (AWS SDK, Telegram API, LLM) — never call real APIs in tests.
-- Test files colocated with source: `src/foo.ts` → `src/foo.test.ts`.
+- Test files live in dedicated test folders: `src/foo.ts` → `tests/foo.test.ts`.
 - Minimum: unit tests for all pure logic, integration tests for API routes.
 
 ---
@@ -184,13 +190,13 @@ When assigned a feature, read `AGENTS.md` (this file) + the feature doc below:
 
 | Feature | Doc | Package(s) | Phase |
 |---------|-----|------------|-------|
-| Telegram Gateway | `docs/features/TELEGRAM_GATEWAY.md` | `apps/api` | Wave 1 |
-| Data Layer | `docs/features/DATA_LAYER.md` | `packages/db`, `packages/shared` | Wave 1 |
-| Tool System | `docs/features/TOOL_SYSTEM.md` | `packages/tools` | Wave 1 |
-| Audit & Observability | `docs/features/AUDIT_LOG.md` | `packages/audit` | Wave 1 |
-| Agent Core | `docs/features/AGENT_CORE.md` | `packages/agent-core` | Wave 2 |
-| Policy Engine | `docs/features/POLICY_ENGINE.md` | `packages/policy` | Wave 2 |
-| AWS Tools | `docs/features/AWS_TOOLS.md` | `packages/tools-aws` | Wave 2 |
+| Telegram Gateway | `apps/docs/features/TELEGRAM_GATEWAY.md` | `apps/api` | Wave 1 |
+| Data Layer | `apps/docs/features/DATA_LAYER.md` | `packages/db`, `packages/shared` | Wave 1 |
+| Tool System | `apps/docs/features/TOOL_SYSTEM.md` | `packages/tools` | Wave 1 |
+| Audit & Observability | `apps/docs/features/AUDIT_LOG.md` | `packages/audit` | Wave 1 |
+| Agent Core | `apps/docs/features/AGENT_CORE.md` | `packages/agent-core` | Wave 2 |
+| Policy Engine | `apps/docs/features/POLICY_ENGINE.md` | `packages/policy` | Wave 2 |
+| AWS Tools | `apps/docs/features/AWS_TOOLS.md` | `packages/tools-aws` | Wave 2 |
 
 **Wave 1** features have no internal dependencies — build in parallel.
 **Wave 2** features depend on Wave 1 contracts — build after Wave 1 merges.
@@ -201,14 +207,14 @@ When assigned a feature, read `AGENTS.md` (this file) + the feature doc below:
 
 | Doc | When to read |
 |-----|-------------|
-| `docs/CONVENTIONS.md` | Before writing any code |
-| `docs/STACK.md` | When choosing a library or pattern |
-| `docs/DATA_MODEL.md` | When touching the database or any model |
-| `docs/PRD.md` | When you need product context for a decision |
-| `docs/ARCHITECTURE.md` | When you need system-level understanding |
-| `docs/ROADMAP.md` | When deciding what's in scope for MVP |
-| `docs/TRUST_AND_PERMISSIONS.md` | When implementing anything security-related |
-| `docs/AGENT_DESIGN.md` | When implementing the agent reasoning loop |
+| `apps/docs/CONVENTIONS.md` | Before writing any code |
+| `apps/docs/STACK.md` | When choosing a library or pattern |
+| `apps/docs/DATA_MODEL.md` | When touching the database or any model |
+| `apps/docs/PRD.md` | When you need product context for a decision |
+| `apps/docs/ARCHITECTURE.md` | When you need system-level understanding |
+| `apps/docs/ROADMAP.md` | When deciding what's in scope for MVP |
+| `apps/docs/TRUST_AND_PERMISSIONS.md` | When implementing anything security-related |
+| `apps/docs/AGENT_DESIGN.md` | When implementing the agent reasoning loop |
 
 ---
 
@@ -229,7 +235,7 @@ npx skills find "zod validation patterns"
 npx skills find "express typescript api"
 ```
 
-Skill policy: `docs/AGENT_SKILLS.md`
+Skill policy: `apps/docs/AGENT_SKILLS.md`
 
 ---
 
@@ -240,7 +246,7 @@ Skill policy: `docs/AGENT_SKILLS.md`
 - [ ] Tests pass (`bun test` in the package)
 - [ ] No TypeScript errors (`bun run check-types`)
 - [ ] No lint errors (`bun run lint`)
-- [ ] Code follows `docs/CONVENTIONS.md`
+- [ ] Code follows `apps/docs/CONVENTIONS.md`
 - [ ] README exists in the package with setup + usage
 - [ ] No secrets, credentials, or hardcoded config values in code
 

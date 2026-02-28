@@ -2,7 +2,7 @@
 
 > **Package:** `apps/api` (Telegram-specific routes + handlers)
 > **Wave:** 1 (no internal dependencies)
-> **Dependencies:** `@helmsman/shared` (types), grammY (Telegram SDK)
+> **Dependencies:** `@helmsman/shared` (types), Express (HTTP server)
 > **Estimated effort:** 3-4 days
 
 ---
@@ -132,20 +132,25 @@ apps/api/
   package.json
   tsconfig.json
   README.md
+  tests/
+    telegram/
+      parser.test.ts
+      dedup.test.ts
+      sender.test.ts
+      commands.test.ts
+    routes/
+      telegram-webhook.test.ts
   src/
-    index.ts                        # Express app entry, start server
+    app.ts                          # Express app factory
+    index.ts                        # Bootstrap + app.listen
     routes/
       telegram.ts                   # POST /webhook/telegram
       health.ts                     # GET /health
     telegram/
       parser.ts                     # Parse TelegramUpdate → NormalizedMessage
-      parser.test.ts
       dedup.ts                      # Deduplication by update_id
-      dedup.test.ts
       sender.ts                     # Send messages back to Telegram
-      sender.test.ts
       commands.ts                   # /start, /help command handlers
-      commands.test.ts
       types.ts                      # Telegram-specific types
     middleware/
       error-handler.ts              # Global error handler
@@ -159,18 +164,28 @@ apps/api/
 
 ### Webhook Setup
 ```typescript
-// Use grammY's webhook handler with Express
-import { Bot, webhookCallback } from "grammy";
+// Express receives webhook and forwards to TelegramWebhookHandler
+app.use("/webhook/telegram", express.text({ type: "*/*" }));
 
-const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+app.post("/webhook/telegram", async (req, res, next) => {
+  try {
+    const request = new Request("http://localhost/webhook/telegram", {
+      method: req.method,
+      headers: Object.entries(req.headers)
+        .flatMap(([key, value]) => Array.isArray(value)
+          ? value.map((item) => [key, item] as [string, string])
+          : typeof value === "string"
+            ? [[key, value] as [string, string]]
+            : []),
+      body: typeof req.body === "string" ? req.body : "",
+    });
 
-// grammY handles all the Telegram-specific parsing
-app.post(
-  "/webhook/telegram",
-  webhookCallback(bot, "express", {
-    secretToken: env.TELEGRAM_WEBHOOK_SECRET,
-  }),
-);
+    const response = await telegramWebhookHandler.handle(request);
+    res.status(response.status).send(await response.text());
+  } catch (error) {
+    next(error);
+  }
+});
 ```
 
 At deploy time, configure Telegram to call your public HTTPS endpoint:
@@ -208,8 +223,8 @@ function isDuplicate(updateId: number): boolean {
 - Repeat every 4 seconds while agent is processing (Telegram typing indicator lasts 5s)
 
 ### Sending Message to User
-- Use grammY `bot.api.sendMessage(chatId, text, options)` for normal replies
-- Use `bot.api.sendChatAction(chatId, "typing")` while processing
+- Use Telegram Bot API over HTTPS (`sendMessage`) for normal replies
+- Use Telegram Bot API over HTTPS (`sendChatAction`) while processing
 - Split responses over 4096 chars into chunks and send sequentially
 
 ### Error Handling
