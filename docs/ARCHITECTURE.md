@@ -1,6 +1,6 @@
 # Architecture — System Design
 
-How InfraChat is built, from message in to infrastructure action out.
+How Helmsman is built, from message in to infrastructure action out.
 
 ---
 
@@ -60,18 +60,21 @@ How InfraChat is built, from message in to infrastructure action out.
                         │  Tool calls
                         ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                       TOOLS LAYER                             │
+│                    TOOLS LAYER (Hybrid)                        │
 │                                                               │
-│  Each tool is a sandboxed module wrapping an external API     │
-│                                                               │
+│  Layer 1: Curated Tools (~15 type-safe, Zod-validated)        │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐    │
-│  │   AWS     │ │  GitHub   │ │  Docker   │ │    K8s    │    │
-│  │  Tool     │ │  Tool     │ │  Tool     │ │   Tool    │    │
+│  │ AWS EC2   │ │ AWS S3    │ │ AWS Cost  │ │ CloudWatch│    │
 │  └───────────┘ └───────────┘ └───────────┘ └───────────┘    │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐                   │
-│  │    GCP    │ │  DO/VMs   │ │  Terraform│                   │
-│  │  Tool     │ │  Tool     │ │  Tool     │                   │
-│  └───────────┘ └───────────┘ └───────────┘                   │
+│                                                               │
+│  Layer 2: Sandboxed CLI Executor (the long tail)              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ shell.execute — runs aws/kubectl/helm/docker/jq      │    │
+│  │ Allowlisted binaries, blocked patterns, risk classify │    │
+│  │ Covers 300+ AWS services without per-service tools   │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                               │
+│  Layer 3: Knowledge (system prompts, few-shot, RAG future)    │
 └───────────────────────┬──────────────────────────────────────┘
                         │  For tasks requiring code execution
                         ▼
@@ -147,46 +150,35 @@ The LLM decides which tools to call, in what order, and how to interpret the res
 
 ---
 
-### Tools Layer
+### Tools Layer (Hybrid Architecture)
 
-Each tool is a typed, documented module that the LLM can call. Tools have:
-- A description the LLM uses to decide when to call it
-- Typed input parameters with validation
+Helmsman uses a **three-layer hybrid tool architecture** (see `docs/AGENT_DESIGN.md` for detailed rationale):
+
+**Layer 1 — Curated Tools** (~15 type-safe tools for 80% of tasks):
+- Each tool is a typed, Zod-validated module the LLM calls via function calling
+- Rich descriptions guide the LLM on when/how to use each tool (Anthropic ACI principle)
+- Read vs. write separation with per-tool risk tier classification
 - Structured output the LLM can reason about
-- Read vs. write permission separation
-- Error handling that returns structured errors (not raw exceptions)
+- Error handling returns structured errors, never raw exceptions
 
-**AWS Tool — Key Actions:**
+MVP curated tools: EC2 (describe, start, stop, metrics), S3 (list, describe, create), CloudWatch (metrics), Cost (monthly summary, service detail).
 
-```
-read:
-  list_instances, describe_instance, get_metrics
-  list_buckets, get_bucket_policy, get_bucket_website_config
-  list_distributions, describe_distribution
-  list_rds_instances, describe_rds_instance
-  get_security_groups, describe_vpc, describe_subnets
-  get_cost_and_usage, list_lambda_functions
-  list_iam_roles, get_role_policy
+**Layer 2 — Sandboxed CLI Executor** (`shell.execute` — the long tail):
+- A single tool that lets the LLM compose and run CLI commands
+- Supports: `aws`, `kubectl`, `helm`, `docker`, `jq`
+- Allowlisted binaries, blocked dangerous patterns, dynamic risk classification
+- Covers 300+ AWS services, all K8s resources, Helm charts — without building per-service tools
+- Every invocation logged to audit trail
 
-write:
-  start_instance, stop_instance, reboot_instance
-  create_instance, terminate_instance, modify_instance_type
-  create_bucket, put_bucket_policy, put_bucket_website
-  create_distribution, update_distribution, create_invalidation
-  create_rds_instance, modify_rds_instance, create_rds_snapshot
-  create_security_group, authorize_ingress, revoke_ingress
-  create_vpc, create_subnet, create_nat_gateway
-  release_elastic_ip, delete_elastic_ip
-```
+**Layer 3 — Knowledge** (no execution needed):
+- Rich system prompts with AWS/K8s/DevOps best practices
+- Few-shot examples of successful operations
+- RAG over documentation (Phase 2+)
+- Handles "explain", "compare", "recommend" intents
 
-**Kubernetes Tool:**
-Wraps kubectl and the K8s API. Supports all standard resource types.
+**Why not a tool per API call?** AWS has 300+ services with thousands of actions. You can't build and maintain them all. The CLI executor gives infinite flexibility with safety guardrails.
 
-**GitHub Tool:**
-Uses GitHub API + git CLI in execution containers. Can read files, understand repo structure, commit, and open PRs.
-
-**Docker Tool:**
-Runs in execution containers. Can build, tag, push, pull, and inspect images.
+**Why not raw CLI only?** Too dangerous. No parameter validation, hard to audit, prompt injection risk. Curated tools for critical ops provide type safety and rich LLM guidance.
 
 ---
 
@@ -255,7 +247,7 @@ This is critical for security. User credentials (AWS keys, GitHub tokens, etc.) 
 
 **Least privilege guidance:**
 - When a user connects their AWS account, the agent shows them a minimal IAM policy for their use case
-- Agent can create a scoped IAM role specifically for InfraChat access
+- Agent can create a scoped IAM role specifically for Helmsman access
 
 ---
 

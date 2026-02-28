@@ -1,6 +1,6 @@
 # Examples — Real Conversations
 
-These show how users actually talk to InfraChat and what the agent does in response. Every example uses real data from the user's infrastructure — no mocked responses.
+These show how users actually talk to Helmsman and what the agent does in response. Every example uses real data from the user's infrastructure — no mocked responses.
 
 ---
 

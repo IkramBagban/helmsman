@@ -1,6 +1,6 @@
 # Best Practices — What the Agent Enforces Automatically
 
-One of InfraChat's core values: **when you do something through the agent, it's done correctly by default.** The agent applies best practices automatically, without the user needing to ask.
+One of Helmsman's core values: **when you do something through the agent, it's done correctly by default.** The agent applies best practices automatically, without the user needing to ask.
 
 This is a significant advantage over using the AWS console or CLI manually, where it's easy to skip steps, forget settings, or not know what best practice even is.
 
@@ -25,7 +25,7 @@ Every EC2 instance the agent creates gets:
 - Name
 - Environment (production/staging/dev)
 - Owner (the requesting user's email or Slack ID)
-- CreatedBy: infrachat
+- CreatedBy: helmsman
 - CreatedAt: timestamp
 - Project (if specified)
 

@@ -1,6 +1,6 @@
 # Trust & Permissions Model
 
-The permission system is the backbone of InfraChat's safety. Get this right and users trust the agent deeply. Get it wrong and one bad command destroys something important — or worse, someone on the team does something they shouldn't be able to.
+The permission system is the backbone of Helmsman's safety. Get this right and users trust the agent deeply. Get it wrong and one bad command destroys something important — or worse, someone on the team does something they shouldn't be able to.
 
 ---
 
@@ -193,7 +193,7 @@ Approvals are recorded with timestamp and approver identity.
 
 The agent should never have root/admin credentials to a cloud account. When a team connects their AWS account, the agent guides them to create a scoped IAM role.
 
-**Recommended AWS IAM permissions for InfraChat:**
+**Recommended AWS IAM permissions for Helmsman:**
 
 ```json
 {

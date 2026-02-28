@@ -1,12 +1,12 @@
 # Competitive Landscape
 
-What exists today, what's missing, and where InfraChat fits.
+What exists today, what's missing, and where Helmsman fits.
 
 ---
 
 ## The Honest Picture
 
-Nobody is doing exactly what InfraChat does. But there are a lot of adjacent tools, and buyers will compare you to them. You need to understand each one deeply.
+Nobody is doing exactly what Helmsman does. But there are a lot of adjacent tools, and buyers will compare you to them. You need to understand each one deeply.
 
 ---
 
@@ -14,7 +14,7 @@ Nobody is doing exactly what InfraChat does. But there are a lot of adjacent too
 
 **AWS Console, AWS CLI, kubectl, gcloud CLI**
 
-This is what everyone uses today. InfraChat's primary competition is the status quo.
+This is what everyone uses today. Helmsman's primary competition is the status quo.
 
 **What they do well:**
 - Full coverage of every service and feature
@@ -28,7 +28,7 @@ This is what everyone uses today. InfraChat's primary competition is the status 
 - No natural language — "stop the instance" requires knowing the instance ID
 - Debugging is manual, painful, and requires tribal knowledge
 
-**InfraChat's advantage:** Speed and accessibility. A junior developer with no AWS experience can ask "why is my website returning 403?" and get a correct answer with a fix plan. A senior developer saves 20 minutes per incident.
+**Helmsman's advantage:** Speed and accessibility. A junior developer with no AWS experience can ask "why is my website returning 403?" and get a correct answer with a fix plan. A senior developer saves 20 minutes per incident.
 
 ---
 
@@ -48,8 +48,8 @@ This is what everyone uses today. InfraChat's primary competition is the status 
 - Terrible for ad-hoc operations ("quickly stop this instance")
 - Debugging Terraform state errors is a specialty skill
 
-**InfraChat's relationship with these tools:**
-InfraChat is not a replacement for IaC — it's the interface on top of it. Phase 6 of the roadmap includes generating Terraform modules and raising PRs against GitOps repos. "Update the RDS instance class to db.r5.large and open a PR" is a legitimate InfraChat workflow that outputs Terraform.
+**Helmsman's relationship with these tools:**
+Helmsman is not a replacement for IaC — it's the interface on top of it. Phase 6 of the roadmap includes generating Terraform modules and raising PRs against GitOps repos. "Update the RDS instance class to db.r5.large and open a PR" is a legitimate Helmsman workflow that outputs Terraform.
 
 ---
 
@@ -70,7 +70,7 @@ These are platforms that add collaboration, state management, and workflows on t
 - Don't help with debugging or incident response
 - Not integrated with where the team communicates (Slack/Telegram)
 
-**InfraChat's advantage:** InfraChat doesn't require any upfront IaC investment. You connect your cloud account and start talking to it immediately.
+**Helmsman's advantage:** Helmsman doesn't require any upfront IaC investment. You connect your cloud account and start talking to it immediately.
 
 ---
 
@@ -91,7 +91,7 @@ These tools let you create runbooks and automations that ops teams can run.
 - Not conversational
 - Building runbooks takes engineering time
 
-**InfraChat's advantage:** InfraChat handles situations it was never explicitly programmed for. When a user describes an unfamiliar issue, the agent reasons through it — not match it against a pre-built runbook.
+**Helmsman's advantage:** Helmsman handles situations it was never explicitly programmed for. When a user describes an unfamiliar issue, the agent reasons through it — not match it against a pre-built runbook.
 
 ---
 
@@ -110,7 +110,7 @@ These tools let you create runbooks and automations that ops teams can run.
 - No conversational memory of your specific infrastructure
 - Amazon Q has some AWS console integration but it's limited
 
-**InfraChat's advantage:** The agent doesn't just suggest — it executes. It knows your specific infrastructure, not generic examples.
+**Helmsman's advantage:** The agent doesn't just suggest — it executes. It knows your specific infrastructure, not generic examples.
 
 ---
 
@@ -135,7 +135,7 @@ Amazon's own AI assistant for AWS. Has some ability to query AWS resources throu
 
 **This is the competitive threat to take most seriously.** AWS has the data advantage (they know your account better than anyone), the distribution advantage (already in the console), and unlimited engineering resources.
 
-InfraChat's defense against AWS Q:
+Helmsman's defense against AWS Q:
 - Multi-cloud by design (AWS Q only does AWS)
 - Lives in Slack/Telegram (AWS Q lives in the AWS console — where people go rarely)
 - Better developer UX (AWS moves slowly, startup moves fast)
@@ -157,7 +157,7 @@ The moat is not any single feature. It's the combination, the integration depth,
 
 ## Who Will Try to Copy This
 
-If InfraChat succeeds, the most likely copycats are:
+If Helmsman succeeds, the most likely copycats are:
 - **Datadog** — already has infrastructure monitoring, will add AI execution layer
 - **PagerDuty** — already in incident response, will add execution capabilities
 - **HashiCorp/IBM** — owns Terraform, could add conversational interface

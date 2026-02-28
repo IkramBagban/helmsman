@@ -1,6 +1,6 @@
 # Challenges — The Hard Problems
 
-These are the real challenges of building InfraChat. Not hypothetical risks — actual hard engineering, product, and business problems that need thoughtful solutions.
+These are the real challenges of building Helmsman. Not hypothetical risks — actual hard engineering, product, and business problems that need thoughtful solutions.
 
 ---
 
@@ -9,7 +9,7 @@ These are the real challenges of building InfraChat. Not hypothetical risks — 
 **The problem:**
 Users connect their AWS, GCP, GitHub, and Kubernetes credentials to your platform. If those credentials are ever compromised — by a breach, a bug, or an insider — attackers can destroy or steal everything in the connected cloud accounts.
 
-This isn't theoretical. Credential leaks have destroyed companies. It's the number one reason enterprise buyers will scrutinize InfraChat before purchasing.
+This isn't theoretical. Credential leaks have destroyed companies. It's the number one reason enterprise buyers will scrutinize Helmsman before purchasing.
 
 **What makes it hard:**
 - Credentials need to be accessible at runtime (the agent needs to call AWS APIs)

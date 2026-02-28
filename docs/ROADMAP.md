@@ -54,7 +54,7 @@ The MVP does one thing extremely well: **answer questions about AWS and perform 
 
 ## Phase 2 — Depth on AWS (Weeks 9–16)
 
-**Goal:** Make InfraChat genuinely more capable than the AWS console for daily operations.
+**Goal:** Make Helmsman genuinely more capable than the AWS console for daily operations.
 
 ### What's in Phase 2
 

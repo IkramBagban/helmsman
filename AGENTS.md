@@ -1,0 +1,260 @@
+# Helmsman — Agent Instructions
+
+> Read this file first. It is the single entrypoint for every AI coding agent working on this codebase.
+> After reading this, read the specific feature doc assigned to you (see Feature Routing below).
+
+---
+
+## What Is Helmsman?
+
+A Jarvis-style AI execution agent. First vertical: DevOps — users talk to Helmsman in Telegram and it reasons about, plans, and executes infrastructure operations. Long-term: expands across domains.
+
+Full product context: `docs/README.md`, `docs/PRD.md`
+
+---
+
+## Monorepo Structure (Turborepo + Bun)
+
+```
+AGENTS.md                       ← you are here
+apps/
+  api/                          ← Express server: Telegram webhook + agent HTTP API
+  web/                          ← Next.js dashboard (future Phase 2)
+packages/
+  agent-core/                   ← LLM orchestration: intent → plan → execute loop
+  tools/                        ← Tool registry, base ToolInterface, sandbox
+  tools-aws/                    ← AWS tool implementations (EC2, S3, CloudWatch, Cost)
+  policy/                       ← Risk tiers, approval gates, permission checks
+  db/                           ← Prisma schema, client, migrations, seed
+  shared/                       ← Shared types, Zod schemas, errors, constants, utils
+  audit/                        ← Structured logging, audit events, trace context
+  eslint-config/                ← (existing) shared ESLint config
+  typescript-config/            ← (existing) shared tsconfig
+  ui/                           ← (existing) shared UI components
+docs/
+  PRD.md                        ← Product requirements, user stories, MVP scope
+  STACK.md                      ← Tech stack decisions + package justifications
+  CONVENTIONS.md                ← Coding patterns, TypeScript, Zod, Prisma, testing
+  DATA_MODEL.md                 ← Database schema design (all Prisma models)
+  ARCHITECTURE.md               ← System design, data flow diagrams
+  ROADMAP.md                    ← Phased build plan
+  features/
+    README.md                   ← Feature index + dependency map + wave plan
+    TELEGRAM_GATEWAY.md         ← Telegram transport feature spec
+    AGENT_CORE.md               ← LLM orchestration feature spec
+    TOOL_SYSTEM.md              ← Tool registry feature spec
+    AWS_TOOLS.md                ← AWS tools feature spec
+    POLICY_ENGINE.md            ← Approval & permissions feature spec
+    DATA_LAYER.md               ← Database package feature spec
+    AUDIT_LOG.md                ← Audit trail feature spec
+```
+
+---
+
+## Tech Stack (Quick Reference)
+
+| Layer | Choice | Notes |
+|-------|--------|-------|
+| Runtime | Bun | Package manager + runtime + test runner |
+| Language | TypeScript 5.9+ | Strict mode, no `any` |
+| Monorepo | Turborepo | Task orchestration, caching |
+| API framework | Express | Mature, huge ecosystem, runs on Bun |
+| Validation | Zod | All external input validated at boundaries |
+| Database | PostgreSQL | Via Supabase or self-hosted |
+| ORM | Prisma | Schema-first, typed client |
+| LLM | Anthropic Claude (primary) | OpenAI + Gemini as fallback. Custom provider layer, no framework. |
+| Chat transport | Telegram Bot API (grammY) | Phase 1; Slack Phase 2 |
+| Cloud target | AWS | First-class; multi-cloud later |
+
+Full stack decisions: `docs/STACK.md`
+
+---
+
+## Build, Dev, and Test Commands
+
+```bash
+# Install dependencies
+bun install
+
+# Dev (all apps, watch mode)
+bun run dev
+
+# Build
+bun run build
+
+# Type check
+bun run check-types
+
+# Lint
+bun run lint
+
+# Format
+bunx prettier --write "**/*.{ts,tsx,md}"
+
+# Test (single package)
+cd packages/agent-core && bun test
+
+# Test (all)
+bun run test
+
+# Database
+cd packages/db && bunx prisma generate
+cd packages/db && bunx prisma migrate dev
+cd packages/db && bunx prisma studio
+
+# Add a package dependency
+cd packages/shared && bun add zod
+```
+
+---
+
+## Coding Conventions (Inline Summary)
+
+Full reference: `docs/CONVENTIONS.md`
+
+### TypeScript
+- Strict mode everywhere. No `any`. No `@ts-ignore`. No `@ts-nocheck`.
+- Prefer `interface` for object shapes, `type` for unions/intersections.
+- Use `const` by default. `let` only when mutation is required. Never `var`.
+- All functions must have explicit return types (except trivial arrow functions).
+- Prefer early returns over deep nesting.
+- Use `readonly` on properties that should not be reassigned.
+
+### Zod
+- Every external boundary (HTTP input, env vars, webhook payloads, tool params) validated with Zod.
+- Derive TypeScript types from Zod schemas: `type Foo = z.infer<typeof FooSchema>`.
+- Schemas live in the package that owns the contract, exported for consumers.
+
+### Prisma
+- Schema lives in `packages/db/prisma/schema.prisma`.
+- Never import `@prisma/client` directly — import the typed client from `@helmsman/db`.
+- All queries go through repository functions, never raw Prisma calls in route handlers.
+
+### File Organization
+- One concept per file. Keep files under 300 LOC; split when larger.
+- Colocate tests: `foo.ts` → `foo.test.ts` in the same directory.
+- Barrel exports via `index.ts` at package root only. No nested barrel files.
+- File naming: `kebab-case.ts` for files, `PascalCase` for types/classes, `camelCase` for functions/variables.
+
+### Error Handling
+- Use the shared `AppError` class from `@helmsman/shared` (never throw raw strings).
+- Every error has: `code` (machine-readable), `message` (human-readable), `context` (metadata object).
+- Errors propagate up; catch at boundaries (route handlers, job processors).
+- Never swallow errors silently. Log + rethrow or handle explicitly.
+
+### Imports
+- Use workspace package aliases: `@helmsman/shared`, `@helmsman/db`, `@helmsman/agent-core`, etc.
+- Never use relative imports across package boundaries.
+- Sort imports: external → workspace packages → local (enforced by linter).
+
+### Testing
+- Framework: Bun test runner (Vitest-compatible API).
+- Naming: `describe("functionName")` → `it("should do X when Y")`.
+- Mock external services (AWS SDK, Telegram API, LLM) — never call real APIs in tests.
+- Test files colocated with source: `src/foo.ts` → `src/foo.test.ts`.
+- Minimum: unit tests for all pure logic, integration tests for API routes.
+
+---
+
+## Multi-Agent Safety Rules
+
+Multiple agents may work on this codebase simultaneously. Follow these rules strictly:
+
+1. **Stay in your lane.** Only modify files within your assigned package/feature. If you need a shared type, add it to `@helmsman/shared` and note it in your PR.
+
+2. **Never switch branches** unless explicitly told to. Work on your feature branch only.
+
+3. **Never create/drop git stashes.** Other agents may have work in progress.
+
+4. **Commit scoped.** Only stage and commit files you changed. Never `git add .` across the whole repo.
+
+5. **Interface contracts are sacred.** If a feature doc defines an input/output contract, implement it exactly. Other agents depend on those types.
+
+6. **When you see unfamiliar files,** ignore them and continue your work. Other agents are working on other features.
+
+7. **No global state mutations.** Don't modify `turbo.json`, root `package.json`, or shared configs without explicit instructions.
+
+8. **Communicate via contracts.** If you need something from another package that doesn't exist yet, create a typed interface in `@helmsman/shared` and use it. The other agent will implement it.
+
+---
+
+## Feature Routing Table
+
+When assigned a feature, read `AGENTS.md` (this file) + the feature doc below:
+
+| Feature | Doc | Package(s) | Phase |
+|---------|-----|------------|-------|
+| Telegram Gateway | `docs/features/TELEGRAM_GATEWAY.md` | `apps/api` | Wave 1 |
+| Data Layer | `docs/features/DATA_LAYER.md` | `packages/db`, `packages/shared` | Wave 1 |
+| Tool System | `docs/features/TOOL_SYSTEM.md` | `packages/tools` | Wave 1 |
+| Audit & Observability | `docs/features/AUDIT_LOG.md` | `packages/audit` | Wave 1 |
+| Agent Core | `docs/features/AGENT_CORE.md` | `packages/agent-core` | Wave 2 |
+| Policy Engine | `docs/features/POLICY_ENGINE.md` | `packages/policy` | Wave 2 |
+| AWS Tools | `docs/features/AWS_TOOLS.md` | `packages/tools-aws` | Wave 2 |
+
+**Wave 1** features have no internal dependencies — build in parallel.
+**Wave 2** features depend on Wave 1 contracts — build after Wave 1 merges.
+
+---
+
+## Shared Documentation (Read as Needed)
+
+| Doc | When to read |
+|-----|-------------|
+| `docs/CONVENTIONS.md` | Before writing any code |
+| `docs/STACK.md` | When choosing a library or pattern |
+| `docs/DATA_MODEL.md` | When touching the database or any model |
+| `docs/PRD.md` | When you need product context for a decision |
+| `docs/ARCHITECTURE.md` | When you need system-level understanding |
+| `docs/ROADMAP.md` | When deciding what's in scope for MVP |
+| `docs/TRUST_AND_PERMISSIONS.md` | When implementing anything security-related |
+| `docs/AGENT_DESIGN.md` | When implementing the agent reasoning loop |
+
+---
+
+## Agent Skills (Recommended)
+
+Install these skills for consistent, high-quality output:
+
+```bash
+# Postgres optimization (already installed)
+# Skill: supabase-postgres-best-practices
+
+# Find more skills
+npx skills find "typescript strict patterns"
+npx skills find "prisma schema design"
+npx skills find "telegram bot grammy"
+npx skills find "aws sdk v3 typescript"
+npx skills find "zod validation patterns"
+npx skills find "express typescript api"
+```
+
+Skill policy: `docs/AGENT_SKILLS.md`
+
+---
+
+## Definition of Done (Every Feature)
+
+- [ ] All acceptance criteria from the feature doc are met
+- [ ] Types exported and match the documented contracts
+- [ ] Tests pass (`bun test` in the package)
+- [ ] No TypeScript errors (`bun run check-types`)
+- [ ] No lint errors (`bun run lint`)
+- [ ] Code follows `docs/CONVENTIONS.md`
+- [ ] README exists in the package with setup + usage
+- [ ] No secrets, credentials, or hardcoded config values in code
+
+---
+
+## Symlinks for Other Agents
+
+If using Claude Code or Claude-based agents, create a symlink:
+```bash
+# Unix/macOS
+ln -s AGENTS.md CLAUDE.md
+
+# Windows (PowerShell, run as admin)
+New-Item -ItemType SymbolicLink -Path CLAUDE.md -Target AGENTS.md
+```
+
+Copilot reads `AGENTS.md` natively. Codex reads `AGENTS.md` natively.
