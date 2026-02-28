@@ -48,6 +48,90 @@ const sanitizeForUser = (text: string): string => {
   return withoutFencedToolBlocks;
 };
 
+const shorten = (value: string, max: number): string => {
+  if (value.length <= max) {
+    return value;
+  }
+
+  return `${value.slice(0, max)}…`;
+};
+
+const summarizeRawOutputFallback = (output: string): string => {
+  try {
+    const parsed = JSON.parse(output) as unknown;
+
+    if (typeof parsed === "object" && parsed !== null && "Buckets" in parsed) {
+      const buckets = (parsed as { Buckets?: Array<{ Name?: string; CreationDate?: string }> }).Buckets ?? [];
+      const preview = buckets
+        .slice(0, 12)
+        .map((bucket, index) => `${index + 1}. ${bucket.Name ?? "unknown"}${bucket.CreationDate ? ` (${bucket.CreationDate.slice(0, 10)})` : ""}`)
+        .join("\n");
+      return [
+        `I found ${buckets.length} S3 bucket(s).`,
+        preview ? `Top buckets:\n${preview}` : "",
+        buckets.length > 12 ? `…and ${buckets.length - 12} more.` : "",
+      ].filter(Boolean).join("\n\n");
+    }
+
+    if (typeof parsed === "object" && parsed !== null && "DistributionList" in parsed) {
+      const items = (parsed as {
+        DistributionList?: { Items?: Array<{ Id?: string; DomainName?: string; Aliases?: { Quantity?: number } }> };
+      }).DistributionList?.Items ?? [];
+
+      const preview = items
+        .slice(0, 10)
+        .map((item, index) => {
+          const aliases = item.Aliases?.Quantity ?? 0;
+          return `${index + 1}. ${item.Id ?? "unknown"} — ${item.DomainName ?? "unknown-domain"} (${aliases} alias${aliases === 1 ? "" : "es"})`;
+        })
+        .join("\n");
+
+      return [
+        `I found ${items.length} CloudFront distribution(s).`,
+        preview ? `Here are the first ones:\n${preview}` : "",
+        items.length > 10 ? `…and ${items.length - 10} more.` : "",
+      ].filter(Boolean).join("\n\n");
+    }
+
+    if (Array.isArray(parsed)) {
+      const preview = parsed
+        .slice(0, 10)
+        .map((item, index) => `${index + 1}. ${shorten(JSON.stringify(item), 160)}`)
+        .join("\n");
+
+      return [
+        `I found ${parsed.length} result(s).`,
+        preview ? `Top results:\n${preview}` : "",
+        parsed.length > 10 ? `…and ${parsed.length - 10} more.` : "",
+      ].filter(Boolean).join("\n\n");
+    }
+  } catch {
+    // fall through to plain-text fallback
+  }
+
+  return `I executed the command successfully.\n\n${shorten(output.replace(/\s+/g, " ").trim(), 700)}`;
+};
+
+const summarizeToolError = (errorText: string): string => {
+  if (/Invalid choice/i.test(errorText)) {
+    return "The command was not valid for this AWS service. I can retry with the correct operation name and then return a clean summary.";
+  }
+
+  if (/Command blocked:/i.test(errorText)) {
+    return `I blocked that command for safety. ${errorText.replace(/^Command blocked:\s*/i, "")}`;
+  }
+
+  if (/timed out/i.test(errorText)) {
+    return "The command timed out. I can retry with a narrower query (filters, region, or max-items).";
+  }
+
+  return `I couldn't complete that command. ${shorten(errorText, 280)}`;
+};
+
+const isAwsInvalidChoiceError = (errorText: string): boolean => {
+  return /aws:\s*error:\s*argument\s+operation:\s*Invalid choice/i.test(errorText);
+};
+
 const parseToolCallCandidate = (candidate: string): ParsedToolCall | null => {
   try {
     const parsed = JSON.parse(candidate) as {
@@ -233,7 +317,47 @@ export class HelmsmanAgentService implements AgentService {
       };
     }
 
-    const toolResult = await tool.execute(parsedToolCall.parameters);
+    let toolResult = await tool.execute(parsedToolCall.parameters);
+
+    if (
+      !toolResult.success
+      && tool instanceof ShellExecuteTool
+      && typeof parsedToolCall.parameters.command === "string"
+      && isAwsInvalidChoiceError(toolResult.error ?? "")
+    ) {
+      try {
+        const retryPlan = await this.llmProvider.generate({
+          systemPrompt:
+            "You are fixing an AWS CLI command that failed with 'Invalid choice'. Respond with ONLY JSON tool_call for shell.execute. Constraints: read-only operation only, keep --output json, keep the same user intent.",
+          messages: [
+            {
+              role: "user",
+              content: [
+                `User request: ${message.text}`,
+                `Failed command: ${parsedToolCall.parameters.command}`,
+                `CLI error: ${toolResult.error ?? "unknown"}`,
+              ].join("\n\n"),
+            },
+          ],
+        });
+
+        const retryToolCall = tryParseToolCall(retryPlan.text);
+        if (
+          retryToolCall
+          && retryToolCall.toolName === "shell.execute"
+          && typeof retryToolCall.parameters.command === "string"
+          && tool.classifyRisk(retryToolCall.parameters.command) === "read_only"
+        ) {
+          const retryResult = await tool.execute(retryToolCall.parameters);
+          if (retryResult.success) {
+            parsedToolCall.parameters.command = retryToolCall.parameters.command;
+            toolResult = retryResult;
+          }
+        }
+      } catch {
+        // Ignore retry failure and return friendly error below.
+      }
+    }
 
     await this.auditService?.log({
       type: "tool_execution",
@@ -249,7 +373,7 @@ export class HelmsmanAgentService implements AgentService {
       return {
         correlationId: message.correlationId,
         status: "error",
-        text: toolResult.error ?? "Tool execution failed.",
+        text: sanitizeForUser(summarizeToolError(toolResult.error ?? "Tool execution failed.")),
       };
     }
 
@@ -259,7 +383,7 @@ export class HelmsmanAgentService implements AgentService {
     try {
       finalAnswer = await this.llmProvider.generate({
         systemPrompt:
-          "You are Helmsman. Summarize tool output in plain operator language. Format as: 1) What I found, 2) Why it matters, 3) Recommended next step. Avoid raw JSON unless explicitly requested.",
+          "You are Helmsman. Reply in a conversational, human-friendly DevOps style. Never expose tool names, payload JSON, or raw command internals. Summarize results clearly with concrete findings, risks, and next step. Avoid dumping raw JSON.",
         messages: [
           { role: "user", content: `User request: ${message.text}` },
           {
@@ -271,16 +395,7 @@ export class HelmsmanAgentService implements AgentService {
     } catch {
       finalAnswer = {
         model: llmResult.model,
-        text: [
-          "1) What I found:",
-          toolResult.output.slice(0, 1500),
-          "",
-          "2) Why it matters:",
-          "This is the direct output from the executed command.",
-          "",
-          "3) Recommended next step:",
-          "If you want, I can refine this into a concise table or run a more targeted query.",
-        ].join("\n"),
+        text: summarizeRawOutputFallback(toolResult.output),
       };
     }
 

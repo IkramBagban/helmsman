@@ -296,4 +296,106 @@ describe("HelmsmanAgentService", () => {
     expect(executeCalled).toBe(false);
     expect(response.text.toLowerCase()).toContain("specific instruction");
   });
+
+  it("should use concise fallback summary when formatter LLM fails", async () => {
+    let generateCount = 0;
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: "shell.execute",
+        description: "shell executor",
+        parameters: { command: "string" },
+        riskTier: "read_only",
+      },
+      execute: async (): Promise<ToolExecutionResult> => ({
+        success: true,
+        output: JSON.stringify({
+          Buckets: [
+            { Name: "bucket-a", CreationDate: "2026-01-01T00:00:00+00:00" },
+            { Name: "bucket-b", CreationDate: "2026-01-02T00:00:00+00:00" },
+          ],
+        }),
+      }),
+    });
+
+    const service = new HelmsmanAgentService({
+      llmProvider: {
+        generate: async () => {
+          generateCount += 1;
+          if (generateCount === 1) {
+            return {
+              model: "test-model",
+              text: JSON.stringify({
+                type: "tool_call",
+                toolName: "shell.execute",
+                parameters: { command: "aws s3api list-buckets --output json" },
+              }),
+            };
+          }
+
+          throw new Error("formatter failed");
+        },
+      },
+      toolRegistry: registry,
+    });
+
+    const response = await service.handleMessage({
+      platform: "telegram",
+      chatId: "1",
+      messageId: "2",
+      userId: "3",
+      text: "list buckets",
+      timestamp: new Date(),
+      correlationId: "corr-8",
+    });
+
+    expect(response.status).toBe("success");
+    expect(response.text).toContain("I found 2 S3 bucket(s).");
+    expect(response.text).not.toContain("{\"Buckets\"");
+  });
+
+  it("should return friendly error for aws invalid choice", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      definition: {
+        name: "shell.execute",
+        description: "shell executor",
+        parameters: { command: "string" },
+        riskTier: "read_only",
+      },
+      execute: async (): Promise<ToolExecutionResult> => ({
+        success: false,
+        output: "",
+        error: "aws: error: argument operation: Invalid choice, valid choices are: get-distribution list-distributions",
+      }),
+    });
+
+    const service = new HelmsmanAgentService({
+      llmProvider: {
+        generate: async () => ({
+          model: "test-model",
+          text: JSON.stringify({
+            type: "tool_call",
+            toolName: "shell.execute",
+            parameters: { command: "aws cloudfront describe-distribution --id E123" },
+          }),
+        }),
+      },
+      toolRegistry: registry,
+    });
+
+    const response = await service.handleMessage({
+      platform: "telegram",
+      chatId: "1",
+      messageId: "2",
+      userId: "3",
+      text: "show distribution",
+      timestamp: new Date(),
+      correlationId: "corr-9",
+    });
+
+    expect(response.status).toBe("error");
+    expect(response.text.toLowerCase()).toContain("command was not valid");
+    expect(response.text).not.toContain("valid choices are");
+  });
 });

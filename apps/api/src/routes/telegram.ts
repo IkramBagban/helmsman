@@ -227,7 +227,7 @@ export const createTelegramWebhookHandler = (
 
               await sender.sendResponse(
                 chatId,
-                `${agentResponse.text}\n\nReply with /approve ${pending.approvalId} to execute this action.`,
+                `${sanitizeAssistantText(agentResponse.text)}\n\nReply with /approve ${pending.approvalId} to execute this action.`,
               );
               return Response.json({ ok: true });
             }
