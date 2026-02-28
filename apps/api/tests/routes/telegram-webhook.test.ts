@@ -67,8 +67,12 @@ describe("POST /webhook/telegram", () => {
     };
 
     const agentService: TelegramAgentService = {
-      async handleMessage(): Promise<{ text: string }> {
-        return { text: "mocked agent response" };
+      async handleMessage(): Promise<{ correlationId: string; status: "success"; text: string }> {
+        return {
+          correlationId: "corr-test-1",
+          status: "success",
+          text: "mocked agent response",
+        };
       },
     };
 
@@ -117,7 +121,7 @@ describe("POST /webhook/telegram", () => {
     };
 
     const agentService: TelegramAgentService = {
-      async handleMessage(): Promise<{ text: string }> {
+      async handleMessage(): Promise<{ correlationId: string; status: "success"; text: string }> {
         throw new Error("simulated agent failure");
       },
     };
@@ -176,5 +180,69 @@ describe("POST /webhook/telegram", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("should return approval instructions when agent asks for approval", async () => {
+    const sentMessages: { chatId: string; text: string }[] = [];
+
+    const sender: TelegramMessageSender = {
+      async sendTyping(): Promise<void> {
+        return;
+      },
+      async sendResponse(chatId: string, text: string): Promise<void> {
+        sentMessages.push({ chatId, text });
+      },
+    };
+
+    const agentService: TelegramAgentService = {
+      async handleMessage(): Promise<{
+        correlationId: string;
+        status: "pending_approval";
+        text: string;
+        metadata: Record<string, unknown>;
+      }> {
+        return {
+          correlationId: "corr-approval",
+          status: "pending_approval",
+          text: "Approval required for this action.",
+          metadata: {
+            toolName: "aws:ec2:Execute",
+            parameters: { action: "TerminateInstances", params: { instanceIds: ["i-123"] } },
+          },
+        };
+      },
+    };
+
+    const app = createApp(baseEnv, {
+      telegram: {
+        dedupStore: new InMemoryDedupStore(),
+        sender,
+        agentService,
+      },
+    });
+    const baseUrl = await startAppServer(app);
+
+    const response = await fetch(`${baseUrl}/webhook/telegram`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": baseEnv.telegramWebhookSecret,
+      },
+      body: JSON.stringify({
+        update_id: 1004,
+        message: {
+          message_id: 13,
+          from: { id: 101, first_name: "Test User" },
+          chat: { id: 44, type: "private" },
+          date: 1_700_000_000,
+          text: "terminate now",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(sentMessages.length).toBe(1);
+    expect(sentMessages[0]?.text).toContain("/approve ");
   });
 });
