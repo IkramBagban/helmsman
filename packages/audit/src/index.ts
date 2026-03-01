@@ -1,4 +1,4 @@
-﻿import { AuditEvent } from "@helmsman/shared";
+﻿import type { AuditEvent } from "@helmsman/shared";
 
 export interface AuditService {
   log(event: Omit<AuditEvent, "id" | "timestamp">): Promise<void>;

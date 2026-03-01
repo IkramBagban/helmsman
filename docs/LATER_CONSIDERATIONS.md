@@ -40,6 +40,11 @@ Before production-grade rollout, several operational and verification details sh
    - Codify non-bypassable rules (destructive always requires hard confirmation).
    - Add invariant tests to prevent regressions.
 
+6. **Runtime secret injection hardening (remove host secret bind mounts)**
+   - Current model uses temporary host files bind-mounted into task containers.
+   - Move to a mechanism that avoids host secret file mounts entirely (direct in-container write from orchestrator stream, short-lived secret sidecar, or equivalent sealed injection).
+   - Add explicit verification that no secret material is exposed via `docker inspect`, host fs scans, or audit payloads.
+
 ---
 
 ### P1 (Should Address Early)
@@ -107,6 +112,10 @@ Before production-grade rollout, several operational and verification details sh
 5. **ARCHITECTURE.md**
    - Add queue/worker path for webhook decoupling under load.
 
+6. **GIT_SSH_DEVOPS_RUNTIME.md**
+   - Add final production target for secret delivery (no host bind-mounted secret files).
+   - Add a validation checklist proving secret non-exposure across logs, inspect output, and crash diagnostics.
+
 ---
 
 ## Acceptance Gates Before Production
@@ -121,6 +130,7 @@ All gates should be green before production launch:
 - [ ] Provider outage drill completed (automatic fallback verified)
 - [ ] Data retention + deletion policy approved and implemented
 - [ ] On-call runbooks published and tested via game day
+- [ ] Runtime secrets hardening verified (no host secret bind mounts in production path)
 
 ---
 

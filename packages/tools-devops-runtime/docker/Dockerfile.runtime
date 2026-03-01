@@ -1,0 +1,23 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    openssh-client \
+    curl \
+    jq \
+    rsync \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g 10001 helmsman && \
+    useradd -u 10001 -g helmsman -m -d /home/helmsman -s /bin/bash helmsman
+
+RUN mkdir -p /workspace && chown helmsman:helmsman /workspace
+
+WORKDIR /workspace
+USER helmsman
+
+COPY --chown=helmsman:helmsman entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
