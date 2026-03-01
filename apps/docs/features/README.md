@@ -16,6 +16,8 @@
 | Agent Core | [AGENT_CORE.md](./AGENT_CORE.md) | `packages/agent-core` | High | Agent 5 |
 | Policy Engine | [POLICY_ENGINE.md](./POLICY_ENGINE.md) | `packages/policy` | Medium | Agent 6 |
 | AWS Tools | [AWS_TOOLS.md](./AWS_TOOLS.md) | `packages/tools-aws` | Medium-High | Agent 7 |
+| GitHub Intelligence | [GIT_SSH_DEVOPS_RUNTIME.md](./GIT_SSH_DEVOPS_RUNTIME.md) | `packages/tools-github` | Medium | Agent 8 |
+| Git / SSH / DevOps Runtime | [GIT_SSH_DEVOPS_RUNTIME.md](./GIT_SSH_DEVOPS_RUNTIME.md) | `packages/tools-devops-runtime` | High | Agent 9 |
 
 ---
 
@@ -34,10 +36,11 @@
     │    db      │  │   tools    │  │   audit     │
     └─────┬──────┘  └──────┬─────┘  └──────┬──────┘
           │                │               │
-          │         ┌──────▼─────┐         │
-          │         │ packages/  │         │
-          │         │ tools-aws  │         │
-          │         └────────────┘         │
+          │         ┌──────▼─────┐  ┌──────────────────────┐  │
+          │         │ packages/  │  │ packages/            │  │
+          │         │ tools-aws  │  │ tools-github         │  │
+          │         └────────────┘  │ tools-devops-runtime │  │
+          │                         └──────────────────────┘  │
           │                                │
     ┌─────▼────────────────────────────────▼──┐
     │           packages/agent-core            │
@@ -77,6 +80,8 @@ These features only depend on `@helmsman/shared` (basic types, errors, utils). A
 | **Agent Core** | db (conversations), tools (registry), audit (logging) | Orchestration engine: intent → plan → execute |
 | **Policy Engine** | shared (types), db (user roles, plans) | Risk classifier + approval gate |
 | **AWS Tools** | tools (ToolInterface to implement) | EC2, S3, CloudWatch, Cost tools |
+| **GitHub Intelligence** | tools (ToolInterface), shared | Read-only GitHub API tools |
+| **Git / SSH / DevOps Runtime** | tools (ToolInterface), shared, audit | Container-isolated git + SSH execution tools |
 
 ### Wave 3 — Integration (After Wave 2)
 
