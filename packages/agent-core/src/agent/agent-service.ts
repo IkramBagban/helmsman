@@ -37,17 +37,24 @@ const isAmbiguousConfirmation = (text: string): boolean => {
 const TOOL_ARTIFACT_PATTERN = /("type"\s*:\s*"tool_call"|"toolName"\s*:\s*"shell\.execute"|```(?:json|tool_code)?)/i;
 
 const sanitizeForUser = (text: string): string => {
-  const withoutFencedToolBlocks = text
+  const withoutArtifacts = text
+    // Strip fenced tool-call blocks
     .replace(/```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi, "")
+    // Strip inline tool-call JSON
     .replace(/\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}/gi, "")
+    // Strip "Tool shell.execute ..." boilerplate
     .replace(/Tool\s+shell\.execute[\s\S]*?(?:approval\.|execution\.)/gi, "")
+    // Strip large fenced JSON blocks (raw API output leaking through)
+    .replace(/```(?:json)?\s*\{[\s\S]{300,}?\}\s*```/gi, "")
+    // Strip [Tool result] injection markers
+    .replace(/\[Tool (?:result|[a-z.]+)\]:\s*/gi, "")
     .trim();
 
-  if (!withoutFencedToolBlocks || TOOL_ARTIFACT_PATTERN.test(withoutFencedToolBlocks)) {
-    return "I can help with that. Tell me what infrastructure detail you want to check, and I’ll return a clean summary.";
+  if (!withoutArtifacts || TOOL_ARTIFACT_PATTERN.test(withoutArtifacts)) {
+    return "On it — what specifically do you want me to look up?";
   }
 
-  return withoutFencedToolBlocks;
+  return withoutArtifacts;
 };
 
 const didAssistantAskToProceed = (conversationHistory: readonly LLMMessage[]): boolean => {
@@ -71,6 +78,21 @@ const shorten = (value: string, max: number): string => {
   return `${value.slice(0, max)}…`;
 };
 
+/** Max tool-call iterations per user message (multi-tool agentic loop). */
+const MAX_TOOL_ITERATIONS = 5;
+
+/** Max chars of tool output fed back into the LLM context. */
+const MAX_TOOL_OUTPUT_FOR_LLM = 12_000;
+
+/** Truncate large tool output so it doesn't overwhelm the LLM context window. */
+const truncateForLLM = (output: string, max: number = MAX_TOOL_OUTPUT_FOR_LLM): string => {
+  if (output.length <= max) {
+    return output;
+  }
+
+  return `${output.slice(0, max)}\n\n[… truncated — ${(output.length - max).toLocaleString()} more chars]`;
+};
+
 const summarizeRawOutputFallback = (output: string): string => {
   try {
     const parsed = JSON.parse(output) as unknown;
@@ -82,9 +104,9 @@ const summarizeRawOutputFallback = (output: string): string => {
         .map((bucket, index) => `${index + 1}. ${bucket.Name ?? "unknown"}${bucket.CreationDate ? ` (${bucket.CreationDate.slice(0, 10)})` : ""}`)
         .join("\n");
       return [
-        `I found ${buckets.length} S3 bucket(s).`,
-        preview ? `Top buckets:\n${preview}` : "",
-        buckets.length > 12 ? `…and ${buckets.length - 12} more.` : "",
+        `You've got ${buckets.length} S3 bucket${buckets.length === 1 ? "" : "s"}.`,
+        preview ? `Here they are:\n${preview}` : "",
+        buckets.length > 12 ? `…plus ${buckets.length - 12} more.` : "",
       ].filter(Boolean).join("\n\n");
     }
 
@@ -102,9 +124,9 @@ const summarizeRawOutputFallback = (output: string): string => {
         .join("\n");
 
       return [
-        `I found ${items.length} CloudFront distribution(s).`,
-        preview ? `Here are the first ones:\n${preview}` : "",
-        items.length > 10 ? `…and ${items.length - 10} more.` : "",
+        `${items.length} CloudFront distribution${items.length === 1 ? "" : "s"}:`,
+        preview || "",
+        items.length > 10 ? `…plus ${items.length - 10} more.` : "",
       ].filter(Boolean).join("\n\n");
     }
 
@@ -115,32 +137,32 @@ const summarizeRawOutputFallback = (output: string): string => {
         .join("\n");
 
       return [
-        `I found ${parsed.length} result(s).`,
-        preview ? `Top results:\n${preview}` : "",
-        parsed.length > 10 ? `…and ${parsed.length - 10} more.` : "",
+        `${parsed.length} result${parsed.length === 1 ? "" : "s"}:`,
+        preview || "",
+        parsed.length > 10 ? `…plus ${parsed.length - 10} more.` : "",
       ].filter(Boolean).join("\n\n");
     }
   } catch {
     // fall through to plain-text fallback
   }
 
-  return `I executed the command successfully.\n\n${shorten(output.replace(/\s+/g, " ").trim(), 700)}`;
+  return `Done. Here's what came back:\n\n${shorten(output.replace(/\s+/g, " ").trim(), 700)}`;
 };
 
 const summarizeToolError = (errorText: string): string => {
   if (/Invalid choice/i.test(errorText)) {
-    return "The command was not valid for this AWS service. I can retry with the correct operation name and then return a clean summary.";
+    return "Wrong sub-command for that AWS service — let me retry with the right one.";
   }
 
   if (/Command blocked:/i.test(errorText)) {
-    return `I blocked that command for safety. ${errorText.replace(/^Command blocked:\s*/i, "")}`;
+    return `Blocked for safety: ${errorText.replace(/^Command blocked:\s*/i, "")}`;
   }
 
   if (/timed out/i.test(errorText)) {
-    return "The command timed out. I can retry with a narrower query (filters, region, or max-items).";
+    return "That timed out. I'll try a narrower query — any specific filters you want?";
   }
 
-  return `I couldn't complete that command. ${shorten(errorText, 280)}`;
+  return `Hit an error: ${shorten(errorText, 280)}`;
 };
 
 const isAwsInvalidChoiceError = (errorText: string): boolean => {
@@ -284,252 +306,251 @@ export class HelmsmanAgentService implements AgentService {
 
     const conversationId = `${message.platform}:${message.chatId}:${message.userId}`;
     const conversationHistory = this.memoryStore.getMessages(conversationId);
-    const llmMessages: LLMMessage[] = [...conversationHistory, { role: "user", content: message.text }];
 
-    const llmResult = await this.llmProvider.generate({
-      systemPrompt,
-      messages: llmMessages,
-    });
+    // Working message list for the agentic loop — includes full conversation history + user's new message.
+    // Each iteration appends the LLM's tool call + tool result so the LLM can chain multiple tools.
+    const loopMessages: LLMMessage[] = [...conversationHistory, { role: "user", content: message.text }];
+    let lastModel = "";
+    let lastToolOutput = "";
+    let lastToolName = "";
+    const seenToolCallKeys: string[] = [];
 
-    // 2. Log LLM response
-    await this.auditService?.log({
-      type: "llm_response",
-      userId: message.userId,
-      correlationId: message.correlationId,
-      metadata: { text: llmResult.text, model: llmResult.model },
-    });
+    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+      // ── Call LLM ──────────────────────────────────────────────────────────
+      let llmResult: { text: string; model: string };
+      try {
+        llmResult = await this.llmProvider.generate({ systemPrompt, messages: loopMessages });
+      } catch {
+        // LLM failed — if we gathered tool output, surface it via fallback
+        if (lastToolOutput) {
+          const fallback = summarizeRawOutputFallback(lastToolOutput);
+          rememberConversationTurn(this.memoryStore, conversationId, message.text, fallback);
+          return {
+            correlationId: message.correlationId,
+            status: "success",
+            text: fallback,
+            metadata: { model: lastModel, toolName: lastToolName },
+          };
+        }
+        throw new Error("LLM call failed and no tool output available for fallback.");
+      }
 
-    const parsedToolCall = tryParseToolCall(llmResult.text);
-    if (!parsedToolCall) {
-      const plainTextResponse = sanitizeForUser(llmResult.text);
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, plainTextResponse);
-
-      return {
+      lastModel = llmResult.model;
+      await this.auditService?.log({
+        type: "llm_response",
+        userId: message.userId,
         correlationId: message.correlationId,
-        status: "success",
-        text: plainTextResponse,
-        metadata: {
-          model: llmResult.model,
-        },
-      };
-    }
+        metadata: { text: llmResult.text, model: llmResult.model },
+      });
 
-    if (
-      parsedToolCall.toolName === "shell.execute"
-      && isAmbiguousConfirmation(message.text)
-      && !didAssistantAskToProceed(conversationHistory)
-    ) {
-      const clarification = "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').";
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, clarification);
+      // ── Parse tool call ───────────────────────────────────────────────────
+      const parsedToolCall = tryParseToolCall(llmResult.text);
 
-      return {
-        correlationId: message.correlationId,
-        status: "success",
-        text: clarification,
-        metadata: {
-          model: llmResult.model,
-        },
-      };
-    }
+      // No tool call → LLM produced a final text response
+      if (!parsedToolCall) {
+        const textResponse = sanitizeForUser(llmResult.text);
+        rememberConversationTurn(this.memoryStore, conversationId, message.text, textResponse);
+        return {
+          correlationId: message.correlationId,
+          status: "success",
+          text: textResponse,
+          metadata: { model: lastModel },
+        };
+      }
 
-    if (parsedToolCall.toolName === "shell.execute" && typeof parsedToolCall.parameters.command !== "string") {
-      return {
-        correlationId: message.correlationId,
-        status: "success",
-        text: "I need a valid command target first. Please restate what you want to check in plain language.",
-        metadata: {
-          model: llmResult.model,
-        },
-      };
-    }
+      // Duplicate tool call detection — LLM is stuck in a loop, break to fallback
+      const toolCallKey = JSON.stringify({ n: parsedToolCall.toolName, p: parsedToolCall.parameters });
+      if (seenToolCallKeys.includes(toolCallKey)) {
+        break;
+      }
+      seenToolCallKeys.push(toolCallKey);
 
-    const tool = this.toolRegistry?.getTool(parsedToolCall.toolName);
-    if (!tool) {
-      const toolMissingResponse = `Tool '${parsedToolCall.toolName}' is not registered.`;
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, toolMissingResponse);
+      // ── First-iteration safety guards ─────────────────────────────────────
+      if (iteration === 0) {
+        if (
+          parsedToolCall.toolName === "shell.execute"
+          && isAmbiguousConfirmation(message.text)
+          && !didAssistantAskToProceed(conversationHistory)
+        ) {
+          const clarification = "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').";
+          rememberConversationTurn(this.memoryStore, conversationId, message.text, clarification);
+          return {
+            correlationId: message.correlationId,
+            status: "success",
+            text: clarification,
+            metadata: { model: llmResult.model },
+          };
+        }
 
-      return {
-        correlationId: message.correlationId,
-        status: "error",
-        text: toolMissingResponse,
-        metadata: {
-          model: llmResult.model,
-        },
-      };
-    }
+        if (parsedToolCall.toolName === "shell.execute" && typeof parsedToolCall.parameters.command !== "string") {
+          return {
+            correlationId: message.correlationId,
+            status: "success",
+            text: "I need a valid command target first. Please restate what you want to check in plain language.",
+            metadata: { model: llmResult.model },
+          };
+        }
+      }
 
-    const policyRequest: ToolExecutionRequest = {
-      toolName: parsedToolCall.toolName,
-      parameters: parsedToolCall.parameters,
-      correlationId: message.correlationId,
-      userId: message.userId,
-    };
+      // ── Resolve tool ──────────────────────────────────────────────────────
+      const tool = this.toolRegistry?.getTool(parsedToolCall.toolName);
+      if (!tool) {
+        const toolMissingResponse = `Tool '${parsedToolCall.toolName}' is not registered.`;
+        rememberConversationTurn(this.memoryStore, conversationId, message.text, toolMissingResponse);
+        return {
+          correlationId: message.correlationId,
+          status: "error",
+          text: toolMissingResponse,
+          metadata: { model: llmResult.model },
+        };
+      }
 
-    // Dynamic risk classification: if the tool supports it (e.g. ShellExecuteTool),
-    // classify based on the actual command content rather than static definition.
-    let riskTier: RiskTier = tool.definition.riskTier;
-    if (tool instanceof ShellExecuteTool && typeof parsedToolCall.parameters.command === "string") {
-      riskTier = tool.classifyRisk(parsedToolCall.parameters.command);
-    }
-    const policyDecision: PolicyDecision = this.policyEngine
-      ? await this.policyEngine.evaluate(policyRequest, riskTier)
-      : { action: "allow" };
-
-    await this.auditService?.log({
-      type: "policy_check",
-      userId: message.userId,
-      correlationId: message.correlationId,
-      metadata: {
+      // ── Policy check ──────────────────────────────────────────────────────
+      const policyRequest: ToolExecutionRequest = {
         toolName: parsedToolCall.toolName,
-        riskTier,
-        decision: policyDecision.action,
-        reason: policyDecision.reason,
-      },
-    });
-
-    if (policyDecision.action === "deny") {
-      const deniedResponse = policyDecision.reason ?? "Policy denied this action.";
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, deniedResponse);
-
-      return {
+        parameters: parsedToolCall.parameters,
         correlationId: message.correlationId,
-        status: "error",
-        text: deniedResponse,
+        userId: message.userId,
       };
-    }
 
-    if (policyDecision.action === "require_approval") {
-      const pendingApprovalResponse = policyDecision.reason ?? "This action requires approval.";
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, pendingApprovalResponse);
+      let riskTier: RiskTier = tool.definition.riskTier;
+      if (tool instanceof ShellExecuteTool && typeof parsedToolCall.parameters.command === "string") {
+        riskTier = tool.classifyRisk(parsedToolCall.parameters.command);
+      }
 
-      return {
+      const policyDecision: PolicyDecision = this.policyEngine
+        ? await this.policyEngine.evaluate(policyRequest, riskTier)
+        : { action: "allow" };
+
+      await this.auditService?.log({
+        type: "policy_check",
+        userId: message.userId,
         correlationId: message.correlationId,
-        status: "pending_approval",
-        text: pendingApprovalResponse,
         metadata: {
           toolName: parsedToolCall.toolName,
-          parameters: parsedToolCall.parameters,
           riskTier,
+          decision: policyDecision.action,
+          reason: policyDecision.reason,
         },
-      };
-    }
+      });
 
-    let toolResult = await tool.execute(parsedToolCall.parameters);
+      if (policyDecision.action === "deny") {
+        const deniedResponse = policyDecision.reason ?? "Policy denied this action.";
+        rememberConversationTurn(this.memoryStore, conversationId, message.text, deniedResponse);
+        return { correlationId: message.correlationId, status: "error", text: deniedResponse };
+      }
 
-    if (
-      !toolResult.success
-      && tool instanceof ShellExecuteTool
-      && typeof parsedToolCall.parameters.command === "string"
-      && isAwsInvalidChoiceError(toolResult.error ?? "")
-    ) {
-      try {
-        const retryPlan = await this.llmProvider.generate({
-          systemPrompt:
-            "You are fixing an AWS CLI command that failed with 'Invalid choice'. Respond with ONLY JSON tool_call for shell.execute. Constraints: read-only operation only, keep --output json, keep the same user intent.",
-          messages: [
-            {
-              role: "user",
-              content: [
-                `User request: ${message.text}`,
-                `Failed command: ${parsedToolCall.parameters.command}`,
-                `CLI error: ${toolResult.error ?? "unknown"}`,
-              ].join("\n\n"),
-            },
-          ],
-        });
+      if (policyDecision.action === "require_approval") {
+        const pendingApprovalResponse = policyDecision.reason ?? "This action requires approval.";
+        rememberConversationTurn(this.memoryStore, conversationId, message.text, pendingApprovalResponse);
+        return {
+          correlationId: message.correlationId,
+          status: "pending_approval",
+          text: pendingApprovalResponse,
+          metadata: { toolName: parsedToolCall.toolName, parameters: parsedToolCall.parameters, riskTier },
+        };
+      }
 
-        const retryToolCall = tryParseToolCall(retryPlan.text);
-        if (
-          retryToolCall
-          && retryToolCall.toolName === "shell.execute"
-          && typeof retryToolCall.parameters.command === "string"
-          && tool.classifyRisk(retryToolCall.parameters.command) === "read_only"
-        ) {
-          const retryResult = await tool.execute(retryToolCall.parameters);
+      // ── Execute tool (with auto-retries for known AWS errors) ─────────────
+      let toolResult = await tool.execute(parsedToolCall.parameters);
+
+      if (
+        !toolResult.success
+        && tool instanceof ShellExecuteTool
+        && typeof parsedToolCall.parameters.command === "string"
+        && isAwsInvalidChoiceError(toolResult.error ?? "")
+      ) {
+        try {
+          const retryPlan = await this.llmProvider.generate({
+            systemPrompt:
+              "You are fixing an AWS CLI command that failed with 'Invalid choice'. Respond with ONLY JSON tool_call for shell.execute. Constraints: read-only operation only, keep --output json, keep the same user intent.",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  `User request: ${message.text}`,
+                  `Failed command: ${parsedToolCall.parameters.command}`,
+                  `CLI error: ${toolResult.error ?? "unknown"}`,
+                ].join("\n\n"),
+              },
+            ],
+          });
+
+          const retryToolCall = tryParseToolCall(retryPlan.text);
+          if (
+            retryToolCall
+            && retryToolCall.toolName === "shell.execute"
+            && typeof retryToolCall.parameters.command === "string"
+            && tool.classifyRisk(retryToolCall.parameters.command) === "read_only"
+          ) {
+            const retryResult = await tool.execute(retryToolCall.parameters);
+            if (retryResult.success) {
+              parsedToolCall.parameters.command = retryToolCall.parameters.command;
+              toolResult = retryResult;
+            }
+          }
+        } catch {
+          // Ignore retry failure — return friendly error below.
+        }
+      }
+
+      if (
+        !toolResult.success
+        && tool instanceof ShellExecuteTool
+        && typeof parsedToolCall.parameters.command === "string"
+        && isCommandSubstitutionBlockedError(toolResult.error ?? "")
+      ) {
+        const rewrittenCommand = rewriteCostExplorerDateSubstitutions(parsedToolCall.parameters.command);
+        if (rewrittenCommand && tool.classifyRisk(rewrittenCommand) === "read_only") {
+          const retryResult = await tool.execute({
+            ...parsedToolCall.parameters,
+            command: rewrittenCommand,
+          });
+
           if (retryResult.success) {
-            parsedToolCall.parameters.command = retryToolCall.parameters.command;
+            parsedToolCall.parameters.command = rewrittenCommand;
             toolResult = retryResult;
           }
         }
-      } catch {
-        // Ignore retry failure and return friendly error below.
       }
+
+      await this.auditService?.log({
+        type: "tool_execution",
+        userId: message.userId,
+        correlationId: message.correlationId,
+        metadata: { toolName: parsedToolCall.toolName, success: toolResult.success },
+      });
+
+      // Tool error → return immediately
+      if (!toolResult.success) {
+        const toolErrorResponse = sanitizeForUser(summarizeToolError(toolResult.error ?? "Tool execution failed."));
+        rememberConversationTurn(this.memoryStore, conversationId, message.text, toolErrorResponse);
+        return { correlationId: message.correlationId, status: "error", text: toolErrorResponse };
+      }
+
+      // ── Tool succeeded — feed result back to LLM for next iteration ───────
+      lastToolOutput = toolResult.output;
+      lastToolName = parsedToolCall.toolName;
+      loopMessages.push(
+        { role: "assistant", content: llmResult.text },
+        { role: "user", content: `[Tool result]:\n${truncateForLLM(toolResult.output)}` },
+      );
     }
 
-    if (
-      !toolResult.success
-      && tool instanceof ShellExecuteTool
-      && typeof parsedToolCall.parameters.command === "string"
-      && isCommandSubstitutionBlockedError(toolResult.error ?? "")
-    ) {
-      const rewrittenCommand = rewriteCostExplorerDateSubstitutions(parsedToolCall.parameters.command);
-      if (rewrittenCommand && tool.classifyRisk(rewrittenCommand) === "read_only") {
-        const retryResult = await tool.execute({
-          ...parsedToolCall.parameters,
-          command: rewrittenCommand,
-        });
-
-        if (retryResult.success) {
-          parsedToolCall.parameters.command = rewrittenCommand;
-          toolResult = retryResult;
-        }
-      }
-    }
-
-    await this.auditService?.log({
-      type: "tool_execution",
-      userId: message.userId,
-      correlationId: message.correlationId,
-      metadata: {
-        toolName: parsedToolCall.toolName,
-        success: toolResult.success,
-      },
-    });
-
-    if (!toolResult.success) {
-      const toolErrorResponse = sanitizeForUser(summarizeToolError(toolResult.error ?? "Tool execution failed."));
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, toolErrorResponse);
-
+    // Loop exhausted (max iterations or duplicate tool call) — deterministic fallback
+    if (lastToolOutput) {
+      const fallback = summarizeRawOutputFallback(lastToolOutput);
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, fallback);
       return {
         correlationId: message.correlationId,
-        status: "error",
-        text: toolErrorResponse,
+        status: "success",
+        text: fallback,
+        metadata: { model: lastModel, toolName: lastToolName },
       };
     }
 
-    // Always use LLM to format output naturally — no deterministic formatters needed.
-    // The rich system prompt ensures the LLM knows how to summarize CLI output.
-    let finalAnswer: { text: string; model: string };
-    try {
-      finalAnswer = await this.llmProvider.generate({
-        systemPrompt:
-          "You are Helmsman. Reply in a conversational, human-friendly DevOps style. Never expose tool names, payload JSON, or raw command internals. Summarize results clearly with concrete findings, risks, and next step. Avoid dumping raw JSON.",
-        messages: [
-          { role: "user", content: `User request: ${message.text}` },
-          {
-            role: "assistant",
-            content: `Tool ${parsedToolCall.toolName} executed command and returned:\n${toolResult.output}`,
-          },
-        ],
-      });
-    } catch {
-      finalAnswer = {
-        model: llmResult.model,
-        text: summarizeRawOutputFallback(toolResult.output),
-      };
-    }
-
-    const assistantResponse = sanitizeForUser(finalAnswer.text);
-    rememberConversationTurn(this.memoryStore, conversationId, message.text, assistantResponse);
-
-    return {
-      correlationId: message.correlationId,
-      status: "success",
-      text: assistantResponse,
-      metadata: {
-        model: finalAnswer.model,
-        toolName: parsedToolCall.toolName,
-      },
-    };
+    const genericFallback = "On it — what specifically do you want me to look up?";
+    rememberConversationTurn(this.memoryStore, conversationId, message.text, genericFallback);
+    return { correlationId: message.correlationId, status: "success", text: genericFallback, metadata: { model: lastModel } };
   }
 }

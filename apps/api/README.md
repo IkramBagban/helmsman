@@ -16,6 +16,15 @@ HTTP API for Telegram webhook intake and response delivery.
 - `GEMINI_BASE_URL` optional override
 - `OPENAI_API_KEY` required when `LLM_PROVIDER=openai`
 - `OPENAI_BASE_URL` optional override
+- `GITHUB_TOKEN` optional, enables authenticated GitHub tool access and higher rate limits
+- `GITHUB_API_BASE_URL` optional override for GitHub Enterprise API
+- DevOps runtime options (optional, used by Docker-backed execution tools):
+  - `HELMSMAN_RUNTIME_IMAGE`
+  - `DOCKER_SOCKET_PATH`
+  - `CONTAINER_DEFAULT_TIMEOUT_MS`
+  - `CONTAINER_DEFAULT_MEMORY_BYTES`
+  - `CONTAINER_DEFAULT_CPU_QUOTA`
+  - `HELMSMAN_ENFORCE_EGRESS_ALLOWLIST`
 
 Copy environment defaults:
 
@@ -84,6 +93,18 @@ Expected:
 - Send `/start`
 - Send `/help`
 - Send a normal message and confirm LLM response arrives
+
+## Tooling Notes
+
+- Telegram requests now include `ShellExecuteTool`, GitHub tools, and Docker-backed DevOps runtime tools in the same agent tool registry.
+- GitHub tools are most reliable with `GITHUB_TOKEN` configured.
+- DevOps runtime tools require Docker access from the API process (`DOCKER_SOCKET_PATH`) and a valid runtime image (`HELMSMAN_RUNTIME_IMAGE`).
+- If runtime env vars are not configured, only shell and non-runtime tools should be used.
+
+### Windows Docker Desktop note
+
+- Keep Docker Desktop running whenever you want to use DevOps runtime tools.
+- On Windows, set `DOCKER_SOCKET_PATH=//./pipe/docker_engine`.
 
 ## Troubleshooting
 

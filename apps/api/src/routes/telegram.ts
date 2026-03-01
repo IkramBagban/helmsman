@@ -4,7 +4,15 @@ import { HelmsmanAgentService, createLLMProvider } from "@helmsman/agent-core";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
 import { ConsoleAuditService } from "@helmsman/audit";
 import { DefaultPolicyEngine } from "@helmsman/policy";
-import { ShellExecuteTool, ToolRegistry } from "@helmsman/tools";
+import { createDevopsRuntimeTools } from "@helmsman/tools-devops-runtime";
+import { createGitHubTools } from "@helmsman/tools-github";
+import {
+  ShellExecuteTool,
+  ToolRegistry,
+  type ToolContext,
+  type ToolInstance,
+  type TypedTool,
+} from "@helmsman/tools";
 
 import type { ApiEnv } from "../config.js";
 import { getCommandResponse } from "../telegram/commands.js";
@@ -35,6 +43,54 @@ const sanitizeAssistantText = (text: string): string => {
 
   return cleaned;
 };
+
+const renderToolOutput = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value === undefined || value === null) {
+    return "ok";
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
+const adaptTypedTool = (tool: TypedTool<unknown>): ToolInstance => ({
+  definition: {
+    name: tool.definition.name,
+    description: tool.definition.description,
+    parameters: tool.definition.parameters,
+    riskTier: tool.definition.riskTier,
+  },
+  execute: async (params: Record<string, unknown>) => {
+    const context: ToolContext = {
+      correlationId: randomUUID(),
+      userId: "telegram-user",
+      timeout: 60_000,
+    };
+
+    const result = await tool.execute(params, context);
+    if (result.ok) {
+      return {
+        success: true,
+        output: renderToolOutput(result.data),
+      };
+    }
+
+    return {
+      success: false,
+      output: "",
+      error: result.error
+        ? `${result.error.code}: ${result.error.message}`
+        : "Tool execution failed.",
+    };
+  },
+});
 
 export interface TelegramWebhookHandler {
   handle(request: Request): Promise<Response>;
@@ -67,6 +123,15 @@ export const createTelegramWebhookHandler = (
 
   const registry = new ToolRegistry();
   registry.register(new ShellExecuteTool());
+  for (const tool of createGitHubTools({
+    token: process.env.GITHUB_TOKEN,
+    baseUrl: process.env.GITHUB_API_BASE_URL,
+  })) {
+    registry.register(adaptTypedTool(tool));
+  }
+  for (const tool of createDevopsRuntimeTools()) {
+    registry.register(adaptTypedTool(tool));
+  }
 
   const approvalStore = new InMemoryApprovalStore();
   const policyEngine = new DefaultPolicyEngine();

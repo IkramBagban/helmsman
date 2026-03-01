@@ -419,7 +419,7 @@ describe("HelmsmanAgentService", () => {
     });
 
     expect(response.status).toBe("success");
-    expect(response.text).toContain("I found 2 S3 bucket(s).");
+    expect(response.text).toContain("S3 bucket");
     expect(response.text).not.toContain("{\"Buckets\"");
   });
 
@@ -464,7 +464,7 @@ describe("HelmsmanAgentService", () => {
     });
 
     expect(response.status).toBe("error");
-    expect(response.text.toLowerCase()).toContain("command was not valid");
+    expect(response.text.toLowerCase()).toContain("wrong sub-command");
     expect(response.text).not.toContain("valid choices are");
   });
 
