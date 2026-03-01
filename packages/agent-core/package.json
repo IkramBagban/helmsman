@@ -16,9 +16,15 @@
     "typescript": "5.9.2"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.34",
     "@helmsman/audit": "workspace:*",
     "@helmsman/policy": "workspace:*",
     "@helmsman/shared": "*",
-    "@helmsman/tools": "workspace:*"
+    "@helmsman/tools": "workspace:*",
+    "@helmsman/tools-devops-runtime": "workspace:*",
+    "@helmsman/tools-github": "workspace:*",
+    "@mastra/core": "^1.8.0",
+    "ai": "^6.0.105",
+    "zod": "^4.3.6"
   }
 }

@@ -7,7 +7,8 @@ const SshBaseSchema = z.object({
   host: z.string().min(1).describe("Target host or IP."),
   port: z.number().int().min(1).max(65535).default(22).describe("SSH port."),
   username: z.string().min(1).describe("SSH username."),
-  knownHostLine: z.string().min(1).describe("Verified known_hosts line for host key pinning."),
+  knownHostLine: z.string().min(1).optional().describe("Verified known_hosts line for host key pinning. Optional; if omitted, SSH uses StrictHostKeyChecking=accept-new."),
+  privateKeyPem: z.string().min(1).optional().describe("OpenSSH private key PEM content. Optional if key is provided via secure context."),
   sshKeyVaultId: z.string().optional().describe("Vault key identifier."),
 });
 
@@ -17,12 +18,18 @@ export const createSshExecTool = (orchestrator: DockerContainerOrchestrator) => 
   execute: async (p, c, o) => {
     const host = assertSafeToken("host", p.host);
     const username = assertSafeToken("username", p.username);
+    const hostKeyOptions = p.knownHostLine
+      ? "-o UserKnownHostsFile=/run/helmsman/secrets/known_hosts -o StrictHostKeyChecking=yes"
+      : "-o StrictHostKeyChecking=accept-new";
     const run = await o.run({
       taskId: crypto.randomUUID(),
       correlationId: c.correlationId,
-      commands: [`ssh -p ${p.port} ${shQuote(`${username}@${host}`)} ${shQuote(p.command)}`],
+      commands: [`ssh ${hostKeyOptions} -p ${p.port} ${shQuote(`${username}@${host}`)} ${shQuote(p.command)}`],
       credentials: {
-        sshKeyPemBase64: typeof c.credentials?.privateKeyBase64 === "string" ? c.credentials.privateKeyBase64 : undefined,
+        sshKeyPemBase64:
+          typeof c.credentials?.privateKeyBase64 === "string"
+            ? c.credentials.privateKeyBase64
+            : (p.privateKeyPem ? Buffer.from(p.privateKeyPem, "utf8").toString("base64") : undefined),
         knownHostLine: p.knownHostLine,
         sshHost: host,
         sshUser: username,
@@ -41,13 +48,19 @@ export const createSshFileReadTool = (orchestrator: DockerContainerOrchestrator)
   execute: async (p, c, o) => {
     const host = assertSafeToken("host", p.host);
     const username = assertSafeToken("username", p.username);
+    const hostKeyOptions = p.knownHostLine
+      ? "-o UserKnownHostsFile=/run/helmsman/secrets/known_hosts -o StrictHostKeyChecking=yes"
+      : "-o StrictHostKeyChecking=accept-new";
     const remoteCmd = `head -c ${p.maxSizeBytes} ${shQuote(p.remotePath)}`;
     return o.run({
       taskId: crypto.randomUUID(),
       correlationId: c.correlationId,
-      commands: [`ssh -p ${p.port} ${shQuote(`${username}@${host}`)} ${shQuote(remoteCmd)}`],
+      commands: [`ssh ${hostKeyOptions} -p ${p.port} ${shQuote(`${username}@${host}`)} ${shQuote(remoteCmd)}`],
       credentials: {
-        sshKeyPemBase64: typeof c.credentials?.privateKeyBase64 === "string" ? c.credentials.privateKeyBase64 : undefined,
+        sshKeyPemBase64:
+          typeof c.credentials?.privateKeyBase64 === "string"
+            ? c.credentials.privateKeyBase64
+            : (p.privateKeyPem ? Buffer.from(p.privateKeyPem, "utf8").toString("base64") : undefined),
         knownHostLine: p.knownHostLine,
         sshHost: host,
         sshUser: username,
@@ -64,6 +77,9 @@ export const createSshFileWriteTool = (orchestrator: DockerContainerOrchestrator
   execute: async (p, c, o) => {
     const host = assertSafeToken("host", p.host);
     const username = assertSafeToken("username", p.username);
+    const hostKeyOptions = p.knownHostLine
+      ? "-o UserKnownHostsFile=/run/helmsman/secrets/known_hosts -o StrictHostKeyChecking=yes"
+      : "-o StrictHostKeyChecking=accept-new";
     const contentBase64 = Buffer.from(p.content, "utf8").toString("base64");
     const backupCmd = p.backup ? `if [ -f ${shQuote(p.remotePath)} ]; then cp ${shQuote(p.remotePath)} ${shQuote(`${p.remotePath}.helmsman.bak`)}; fi && ` : "";
     const remoteCmd = `${backupCmd}printf %s ${shQuote(contentBase64)} | base64 -d > ${shQuote(p.remotePath)} && chmod ${p.mode} ${shQuote(p.remotePath)}`;
@@ -71,9 +87,12 @@ export const createSshFileWriteTool = (orchestrator: DockerContainerOrchestrator
     return o.run({
       taskId: crypto.randomUUID(),
       correlationId: c.correlationId,
-      commands: [`ssh -p ${p.port} ${shQuote(`${username}@${host}`)} ${shQuote(remoteCmd)}`],
+      commands: [`ssh ${hostKeyOptions} -p ${p.port} ${shQuote(`${username}@${host}`)} ${shQuote(remoteCmd)}`],
       credentials: {
-        sshKeyPemBase64: typeof c.credentials?.privateKeyBase64 === "string" ? c.credentials.privateKeyBase64 : undefined,
+        sshKeyPemBase64:
+          typeof c.credentials?.privateKeyBase64 === "string"
+            ? c.credentials.privateKeyBase64
+            : (p.privateKeyPem ? Buffer.from(p.privateKeyPem, "utf8").toString("base64") : undefined),
         knownHostLine: p.knownHostLine,
         sshHost: host,
         sshUser: username,

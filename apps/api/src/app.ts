@@ -40,7 +40,7 @@ const toHeaderEntries = (request: ExpressRequest, response: ExpressResponse): [s
   return entries;
 };
 
-export const createApp = (env: ApiEnv, dependencies?: ApiAppDependencies): express.Express => {
+export const createApp = async (env: ApiEnv, dependencies?: ApiAppDependencies): Promise<express.Express> => {
   const app = express();
 
   let telegramDeps = dependencies?.telegram;
@@ -60,7 +60,7 @@ export const createApp = (env: ApiEnv, dependencies?: ApiAppDependencies): expre
   }
 
   const telegramWebhookHandler = dependencies?.telegramWebhookHandler
-    ?? createTelegramWebhookHandler(env, telegramDeps);
+    ?? await createTelegramWebhookHandler(env, telegramDeps);
 
   app.use(correlationIdMiddleware());
   app.use(requestLoggingMiddleware());

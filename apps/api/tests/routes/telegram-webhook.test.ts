@@ -3,8 +3,10 @@ import type { Server } from "node:http";
 
 import { createApp } from "../../src/app.js";
 import type { ApiEnv } from "../../src/config.js";
-import type { TelegramAgentService, TelegramMessageSender } from "../../src/routes/telegram.js";
+import type { TelegramMessageSender } from "../../src/routes/telegram.js";
 import { InMemoryDedupStore } from "../../src/telegram/dedup.js";
+import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
+import type { AgentResponse, NormalizedMessage } from "@helmsman/shared";
 
 const baseEnv: ApiEnv = {
   port: 3000,
@@ -16,7 +18,21 @@ const baseEnv: ApiEnv = {
 
 const servers: Server[] = [];
 
-const startAppServer = async (app: ReturnType<typeof createApp>): Promise<string> => {
+/** Create a mock orchestrator from a handleMessage function. */
+function mockOrchestrator(
+  handleMessage: (message: NormalizedMessage) => Promise<AgentResponse>,
+): HelmsmanOrchestrator {
+  return {
+    handleMessage,
+    handleApproval: async () => ({
+      correlationId: "mock",
+      status: "error" as const,
+      text: "No pending approval",
+    }),
+  } as unknown as HelmsmanOrchestrator;
+}
+
+const startAppServer = async (app: Awaited<ReturnType<typeof createApp>>): Promise<string> => {
   const server = app.listen(0);
   servers.push(server);
 
@@ -66,21 +82,17 @@ describe("POST /webhook/telegram", () => {
       },
     };
 
-    const agentService: TelegramAgentService = {
-      async handleMessage(): Promise<{ correlationId: string; status: "success"; text: string }> {
-        return {
-          correlationId: "corr-test-1",
-          status: "success",
-          text: "mocked agent response",
-        };
-      },
-    };
+    const orchestrator = mockOrchestrator(async () => ({
+      correlationId: "corr-test-1",
+      status: "success",
+      text: "mocked agent response",
+    }));
 
-    const app = createApp(baseEnv, {
+    const app = await createApp(baseEnv, {
       telegram: {
         dedupStore: new InMemoryDedupStore(),
         sender,
-        agentService,
+        orchestrator,
       },
     });
     const baseUrl = await startAppServer(app);
@@ -120,17 +132,15 @@ describe("POST /webhook/telegram", () => {
       },
     };
 
-    const agentService: TelegramAgentService = {
-      async handleMessage(): Promise<{ correlationId: string; status: "success"; text: string }> {
-        throw new Error("simulated agent failure");
-      },
-    };
+    const orchestrator = mockOrchestrator(async () => {
+      throw new Error("simulated agent failure");
+    });
 
-    const app = createApp(baseEnv, {
+    const app = await createApp(baseEnv, {
       telegram: {
         dedupStore: new InMemoryDedupStore(),
         sender,
-        agentService,
+        orchestrator,
       },
     });
     const baseUrl = await startAppServer(app);
@@ -158,7 +168,7 @@ describe("POST /webhook/telegram", () => {
   });
 
   it("should return 200 from error middleware when webhook handler throws", async () => {
-    const app = createApp(baseEnv, {
+    const app = await createApp(baseEnv, {
       telegramWebhookHandler: {
         async handle(): Promise<Response> {
           throw new Error("simulated route failure");
@@ -194,30 +204,21 @@ describe("POST /webhook/telegram", () => {
       },
     };
 
-    const agentService: TelegramAgentService = {
-      async handleMessage(): Promise<{
-        correlationId: string;
-        status: "pending_approval";
-        text: string;
-        metadata: Record<string, unknown>;
-      }> {
-        return {
-          correlationId: "corr-approval",
-          status: "pending_approval",
-          text: "Approval required for this action.",
-          metadata: {
-            toolName: "aws:ec2:Execute",
-            parameters: { action: "TerminateInstances", params: { instanceIds: ["i-123"] } },
-          },
-        };
+    const orchestrator = mockOrchestrator(async () => ({
+      correlationId: "corr-approval",
+      status: "pending_approval",
+      text: "Approval required for this action.\n\nReply with /approve abc123 to proceed.",
+      metadata: {
+        approvalId: "abc123",
+        suspendedStep: "approval-gate",
       },
-    };
+    }));
 
-    const app = createApp(baseEnv, {
+    const app = await createApp(baseEnv, {
       telegram: {
         dedupStore: new InMemoryDedupStore(),
         sender,
-        agentService,
+        orchestrator,
       },
     });
     const baseUrl = await startAppServer(app);
@@ -258,30 +259,17 @@ describe("POST /webhook/telegram", () => {
       },
     };
 
-    const agentService: TelegramAgentService = {
-      async handleMessage(): Promise<{
-        correlationId: string;
-        status: "pending_approval";
-        text: string;
-        metadata: Record<string, unknown>;
-      }> {
-        return {
-          correlationId: "corr-approval-2",
-          status: "pending_approval",
-          text: "Tool shell.execute has risk tier significant and requires explicit approval.",
-          metadata: {
-            toolName: "shell.execute",
-            parameters: { command: "aws ec2 stop-instances --instance-ids i-123" },
-          },
-        };
-      },
-    };
+    const orchestrator = mockOrchestrator(async () => ({
+      correlationId: "corr-approval-2",
+      status: "pending_approval",
+      text: "🟡 Significant action detected.\n\nStop staging instance\n\nCommand: `aws ec2 stop-instances --instance-ids i-123`\n\nReply with /approve xyz789 to proceed.",
+    }));
 
-    const app = createApp(baseEnv, {
+    const app = await createApp(baseEnv, {
       telegram: {
         dedupStore: new InMemoryDedupStore(),
         sender,
-        agentService,
+        orchestrator,
       },
     });
     const baseUrl = await startAppServer(app);
@@ -306,7 +294,8 @@ describe("POST /webhook/telegram", () => {
 
     expect(response.status).toBe(200);
     expect(sentMessages.length).toBe(1);
+    // The new orchestrator produces clean user-facing messages, not internal tool references
     expect(sentMessages[0]?.text).not.toContain("Tool shell.execute");
-    expect(sentMessages[0]?.text).toContain("needs your approval");
+    expect(sentMessages[0]?.text).toContain("Significant action");
   });
 });

@@ -11,12 +11,7 @@
   },
   "dependencies": {
     "@helmsman/agent-core": "*",
-    "@helmsman/audit": "workspace:*",
-    "@helmsman/policy": "workspace:*",
     "@helmsman/shared": "*",
-    "@helmsman/tools": "workspace:*",
-    "@helmsman/tools-devops-runtime": "workspace:*",
-    "@helmsman/tools-github": "workspace:*",
     "express": "^5.2.1",
     "ioredis": "^5.10.0"
   },
