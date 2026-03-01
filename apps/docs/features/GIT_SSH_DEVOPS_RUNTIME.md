@@ -73,7 +73,7 @@ This separation is intentional. Mixing read-only GitHub API calls with container
 │                                                                   │
 │  ContainerOrchestrator ──────────────────────────────────────┐   │
 │   • Validates all inputs before container start              │   │
-│   • Passes only scoped credentials into container env        │   │
+│   • Injects secrets as ephemeral tmpfs files (not env values)│   │
 │   • Sets hard CPU / memory / time limits                     │   │
 │   • Streams stdout/stderr back as ToolResponse               │   │
 │   • Kills container on timeout or error                      │   │
@@ -97,11 +97,11 @@ This separation is intentional. Mixing read-only GitHub API calls with container
 │    • User-specified SSH host (per-container network policy)      │
 │    • User-specified Git remote host                              │
 │                                                                   │
-│  Credentials injected at runtime via env vars (never baked in):  │
-│    HELMSMAN_SSH_KEY_B64   ← base64 ephemeral private key         │
-│    HELMSMAN_GIT_TOKEN     ← scoped GitHub token if needed        │
-│    HELMSMAN_SSH_HOST      ← target host                          │
-│    HELMSMAN_SSH_USER      ← target user                          │
+│  Secrets injected at runtime as tmpfs files (never baked in):    │
+│    /run/helmsman/secrets/ssh_key      (0400)                     │
+│    /run/helmsman/secrets/known_hosts  (0444)                     │
+│    /run/helmsman/secrets/git_token    (0400, optional)           │
+│  Env vars may contain file paths only, never secret values       │
 │                                                                   │
 │  Lifecycle: spin up → execute → stream output → destroy          │
 │  Max lifetime: configurable (default 300s hard kill)             │
@@ -113,9 +113,9 @@ This separation is intentional. Mixing read-only GitHub API calls with container
 1. **One task per container.** Never reuse a container across tasks or users.
 2. **No privileged mode.** `--privileged` is never set.
 3. **No host mounts.** Never mount `/var/run/docker.sock` or any host path into the container.
-4. **Credentials are injected, never stored.** SSH keys and tokens are passed as env vars for the duration of the task, then the container is destroyed.
+4. **Secrets are file-mounted, never env-injected.** SSH keys and tokens are written to per-task tmpfs secret files with strict permissions, passed by path only, and wiped before container removal.
 5. **Time limits are hard limits.** The orchestrator sends `docker kill` (SIGKILL) after the timeout. Not SIGTERM. The container is not given a grace period to do cleanup that could leak data.
-6. **Network is locked.** The container starts with `--network none`. Only the specific egress destinations for the task are opened via a container-specific Docker network with iptables rules.
+6. **Network is enforceably locked.** Tasks without network run with `--network none`. Tasks requiring network run on an isolated runtime network with host firewall or egress gateway rules that default-deny all traffic except explicit `egressAllowlist` destinations.
 7. **All output is captured and redacted before being returned.** SSH keys, tokens, and other secrets are scrubbed from stdout/stderr before the response is stored or displayed.
 
 ---
@@ -570,7 +570,7 @@ packages/tools-devops-runtime/
       container-orchestrator.ts ← creates, runs, streams, destroys containers
       container-config.ts       ← builds Docker container config from task params
       network-policy.ts         ← per-container network rules (egress allowlist)
-      credential-injector.ts    ← injects credentials as env vars, validates format
+      credential-injector.ts    ← writes secrets to tmpfs files, injects file paths only
       output-redactor.ts        ← scrubs secrets from stdout/stderr before return
     tools/
       git-clone.ts              ← devops.git.clone
@@ -610,8 +610,8 @@ export interface SSHCredentials extends ToolCredentials {
   privateKeyBase64: string;
   /** Optional passphrase for the private key */
   passphrase?: string;
-  /** Fingerprint of the host's public key for verification. */
-  knownHostFingerprint?: string;
+  /** Full known_hosts line, e.g. "host ssh-ed25519 AAAAC3..." */
+  knownHostLine: string;
 }
 
 export interface GitCredentials extends ToolCredentials {
@@ -635,7 +635,7 @@ export interface ContainerTaskSpec {
   taskId: string;
   /** The shell commands to run inside the container, in order */
   commands: readonly string[];
-  /** Credentials to inject as env vars (values redacted in logs) */
+  /** Credentials resolved in memory; injector writes secret files and passes paths only */
   credentials?: ContainerCredentials;
   /** Max time in milliseconds before hard kill (default: 300_000 = 5 minutes) */
   timeoutMs?: number;
@@ -654,11 +654,12 @@ export interface EgressRule {
 }
 
 export interface ContainerCredentials {
-  sshKey?: string;        // base64 PEM — injected as HELMSMAN_SSH_KEY_B64
-  gitToken?: string;      // injected as HELMSMAN_GIT_TOKEN (redacted in logs)
-  sshHost?: string;       // injected as HELMSMAN_SSH_HOST
-  sshUser?: string;       // injected as HELMSMAN_SSH_USER
-  sshPort?: string;       // injected as HELMSMAN_SSH_PORT
+  sshKeyPemBase64?: string;   // resolved from vault; written to /run/helmsman/secrets/ssh_key
+  gitToken?: string;          // resolved from vault; written to /run/helmsman/secrets/git_token
+  knownHostLine?: string;     // written to /run/helmsman/secrets/known_hosts
+  sshHost?: string;           // non-secret metadata
+  sshUser?: string;           // non-secret metadata
+  sshPort?: string;           // non-secret metadata
 }
 
 export interface ContainerResult {
@@ -680,7 +681,7 @@ export interface ContainerOrchestrator {
 2. Attach to stdout + stderr as separate streams before starting the container.
 3. Use `container.wait()` with a Promise race against a `setTimeout(timeoutMs)` that calls `container.kill({ signal: 'SIGKILL' })`.
 4. Always call `container.remove({ force: true })` in a `finally` block — this MUST run even if an exception is thrown.
-5. Never log the raw `credentials` object. Log `{ taskId, commands, egressAllowlist }` only.
+5. Never log the raw `credentials` object, raw command strings, or env values. Log `{ taskId, commandSummary, commandFingerprint, egressAllowlist }` only.
 6. The container name must be `helmsman-task-{taskId}` so orphan containers can be identified.
 
 ### Dockerfile.runtime
@@ -711,7 +712,7 @@ RUN mkdir -p /workspace && chown helmsman:helmsman /workspace
 WORKDIR /workspace
 USER helmsman
 
-# Entrypoint: sets up SSH key from env, configures known hosts, then runs commands
+# Entrypoint: reads secret file paths, configures SSH/git, then runs commands
 COPY --chown=helmsman:helmsman entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
@@ -725,21 +726,21 @@ ENTRYPOINT ["/entrypoint.sh"]
 # packages/tools-devops-runtime/docker/entrypoint.sh
 set -euo pipefail
 
-# Set up SSH key if provided
-if [ -n "${HELMSMAN_SSH_KEY_B64:-}" ]; then
+# Set up SSH key from mounted secret file path if provided
+if [ -n "${HELMSMAN_SSH_KEY_FILE:-}" ]; then
   mkdir -p ~/.ssh
   chmod 700 ~/.ssh
-  echo "$HELMSMAN_SSH_KEY_B64" | base64 --decode > ~/.ssh/helmsman_task_key
+  cp "$HELMSMAN_SSH_KEY_FILE" ~/.ssh/helmsman_task_key
   chmod 600 ~/.ssh/helmsman_task_key
 
-  # Add host to known_hosts if fingerprint is provided
-  if [ -n "${HELMSMAN_SSH_KNOWN_HOST:-}" ] && [ -n "${HELMSMAN_SSH_HOST:-}" ]; then
-    echo "${HELMSMAN_SSH_HOST} ${HELMSMAN_SSH_KNOWN_HOST}" > ~/.ssh/known_hosts
+  # Add host key verification data if provided
+  if [ -n "${HELMSMAN_KNOWN_HOSTS_FILE:-}" ]; then
+    cp "$HELMSMAN_KNOWN_HOSTS_FILE" ~/.ssh/known_hosts
     chmod 644 ~/.ssh/known_hosts
   elif [ -n "${HELMSMAN_SSH_HOST:-}" ]; then
     # Strict host key checking ON by default — do not skip
-    # The orchestrator must always provide the known host fingerprint for real SSH
-    echo "ERROR: HELMSMAN_SSH_KNOWN_HOST is required when HELMSMAN_SSH_HOST is set." >&2
+    # The orchestrator must always provide a valid known_hosts line for real SSH
+    echo "ERROR: HELMSMAN_KNOWN_HOSTS_FILE is required when HELMSMAN_SSH_HOST is set." >&2
     exit 1
   fi
 
@@ -747,8 +748,9 @@ if [ -n "${HELMSMAN_SSH_KEY_B64:-}" ]; then
   export GIT_SSH_COMMAND="ssh -i ~/.ssh/helmsman_task_key -o BatchMode=yes -o StrictHostKeyChecking=yes"
 fi
 
-# Configure git HTTP token if provided
-if [ -n "${HELMSMAN_GIT_TOKEN:-}" ]; then
+# Configure git HTTP token from mounted secret file if provided
+if [ -n "${HELMSMAN_GIT_TOKEN_FILE:-}" ]; then
+  HELMSMAN_GIT_TOKEN="$(cat "$HELMSMAN_GIT_TOKEN_FILE")"
   git config --global credential.helper store
   echo "https://x-access-token:${HELMSMAN_GIT_TOKEN}@github.com" > ~/.git-credentials
   chmod 600 ~/.git-credentials
@@ -912,16 +914,14 @@ const ParamsSchema = z.object({
   ),
 
   /**
-   * Fingerprint of the remote host's public key.
-   * REQUIRED for real SSH connections. The agent must ask the user to verify
-   * or provide this. Never proceed with StrictHostKeyChecking=no.
-   * The user can run: ssh-keyscan -t ed25519 <host>
-   * to get this value if they don't have it.
+   * Full known_hosts entry for the remote host public key.
+   * REQUIRED for real SSH connections. Never proceed with StrictHostKeyChecking=no.
+   * `ssh-keyscan` output alone is not sufficient trust — user must verify fingerprint
+   * from an out-of-band trusted source before approval.
    */
-  knownHostFingerprint: z.string().min(1).describe(
-    "The remote host's public key fingerprint from ssh-keyscan. " +
-    "Required. Ask the user: 'Please provide the host fingerprint, or run " +
-    "`ssh-keyscan -t ed25519 <your-host>` and share the output.'"
+  knownHostLine: z.string().min(1).describe(
+    "known_hosts line for the target host, preferably ssh-ed25519 only. " +
+    "Require out-of-band fingerprint verification before use."
   ),
 
   timeout: z.number().int().min(1).max(300).default(60).describe(
@@ -955,7 +955,7 @@ const ParamsSchema = z.object({
   port: z.number().default(22),
   username: z.string(),
   sshKeyVaultId: z.string(),
-  knownHostFingerprint: z.string(),
+  knownHostLine: z.string(),
   remotePath: z.string().describe("Absolute path on the remote machine"),
   maxSizeBytes: z.number().max(1_048_576).default(102_400).describe(
     "Max file size to transfer. Tool fails if file is larger. Default 100KB."
@@ -974,7 +974,7 @@ const ParamsSchema = z.object({
   port: z.number().default(22),
   username: z.string(),
   sshKeyVaultId: z.string(),
-  knownHostFingerprint: z.string(),
+  knownHostLine: z.string(),
   remotePath: z.string().describe("Absolute path on the remote machine to write to"),
   content: z.string().describe("File content to write"),
   mode: z.string().regex(/^[0-7]{3,4}$/).default("644"),
@@ -1021,10 +1021,10 @@ const ParamsSchema = z.object({
 SSH keys and tokens are NEVER stored as raw values in the database. They are stored encrypted-at-rest via the credential vault in `packages/db`.
 
 ```
-User provides SSH key via Telegram
+User uploads SSH key via one-time secure vault upload URL (not chat body)
          │
          ▼
-API receives key in message
+API receives key over HTTPS upload endpoint
          │
          ▼  Encrypt with team's vault key (AES-256-GCM)
          ▼
@@ -1037,7 +1037,8 @@ Agent uses vaultId to reference key in tool calls (never the raw key)
          ▼
 ContainerOrchestrator calls CredentialVault.resolve(vaultId)
          │  → decrypts in memory
-         │  → passes base64-encoded key into container as env var
+         │  → writes key to per-task tmpfs secret file with 0400 perms
+         │  → passes file path into container env
          │  → after container is destroyed, decrypted value goes out of scope
          ▼
 Container uses key, is destroyed
@@ -1063,11 +1064,11 @@ Before I can SSH into a machine, I need a few things:
 2. **Username**: What SSH username should I use? (e.g., ubuntu, ec2-user, root)
 3. **SSH Key**: Which SSH key should I use?
    - If you have a key already stored with Helmsman, tell me its name.
-   - If not, you can paste your private key and I'll store it securely.
-4. **Host Fingerprint**: Do you have the host's fingerprint?
-   - If you're not sure, you can get it by running:
+  - If not, use the secure upload flow (one-time link). Do not paste secrets in chat.
+4. **Host Key Verification**: Please provide a verified known_hosts entry (ed25519 preferred).
+  - You can collect candidate data by running:
      `ssh-keyscan -t ed25519 <your-host>`
-   - This is required for secure connection verification.
+  - Then verify that fingerprint out-of-band (provider console / CMDB / trusted runbook) before use.
 ```
 
 ### For Git Clone (Private Repos)
@@ -1133,7 +1134,7 @@ Task ends → ContainerOrchestrator deletes volume "helmsman-ws-abc-123"
 
 ## Network Policy Per Container
 
-Each container gets an isolated Docker network. The orchestrator configures iptables rules for that network based on the `egressAllowlist` in the task spec.
+Each container gets an isolated network posture with enforceable default-deny egress. DNS-only restrictions are not considered security controls.
 
 ```typescript
 // packages/tools-devops-runtime/src/orchestrator/network-policy.ts
@@ -1143,21 +1144,19 @@ export async function createTaskNetwork(
   taskId: string,
   egressRules: readonly EgressRule[],
 ): Promise<string> {
-  // Create a bridge network
+  // Enforceable MVP model:
+  // 1) If egressRules is empty, run container with --network none.
+  // 2) If egressRules is non-empty, attach to dedicated runtime network.
+  // 3) Apply host-level firewall or egress gateway policy that blocks all outbound
+  //    traffic except explicit destination IP:port from egressRules.
+  // 4) Deny task startup if allowlist enforcement cannot be applied.
   const network = await docker.createNetwork({
     Name: `helmsman-net-${taskId}`,
     Driver: "bridge",
     Options: {
-      "com.docker.network.bridge.enable_icc": "false",  // no inter-container comms
+      "com.docker.network.bridge.enable_icc": "false",
     },
   });
-  // NOTE: Fine-grained iptables egress allowlisting requires iptables management
-  // outside dockerode. In the MVP, implement this as:
-  // 1. Create network with --internal (no external access by default).
-  // 2. For each egressRule, add a specific iptables FORWARD rule for the container's IP.
-  // Full iptables-based implementation is documented in docs/LATER_CONSIDERATIONS.md.
-  // MVP fallback: log the intended egress rules and use Docker's --add-host option
-  // to limit DNS resolution to only approved hosts.
   return network.id;
 }
 
@@ -1183,7 +1182,7 @@ const REDACTION_PATTERNS: readonly RegExp[] = [
   /gho_[A-Za-z0-9]{36}/g,           // GitHub OAuth token
   /ghs_[A-Za-z0-9]{36}/g,           // GitHub App token
   /AKIA[0-9A-Z]{16}/g,               // AWS Access Key ID
-  /[0-9a-zA-Z/+]{40}/g,             // Generic 40-char base64 (AWS Secret Key shape)
+  /(?:aws_secret_access_key|x-amz-security-token|authorization)\s*[:=]\s*[^\s"']+/gi,
 ];
 
 export function redactOutput(raw: string): string {
@@ -1196,6 +1195,8 @@ export function redactOutput(raw: string): string {
 ```
 
 This function must be called on ALL stdout and stderr before they are stored in the audit log, sent to the LLM, or returned in a `ToolResponse`.
+
+For MVP, redaction must combine regex rules above with context-aware key/value masking and unit tests for false positives. Avoid broad generic token-length regexes that can corrupt normal output.
 
 ---
 
@@ -1270,9 +1271,9 @@ Every tool invocation emits structured audit events via `@helmsman/audit`.
 { event: "devops.container.end",     taskId, correlationId, exitCode, durationMs, killed }
 { event: "devops.container.timeout", taskId, correlationId, timeoutMs }
 { event: "devops.git.clone",         taskId, correlationId, repoUrl, branch }
-{ event: "devops.ssh.exec",          taskId, correlationId, host, command }
+{ event: "devops.ssh.exec",          taskId, correlationId, host, commandSummary, commandFingerprint }
 { event: "devops.ssh.fileWrite",     taskId, correlationId, host, remotePath }
-// NEVER log: credentials, tokens, private keys, stdout content (raw)
+// NEVER log: credentials, tokens, private keys, raw command strings, stdout content (raw)
 
 // packages/tools-github fires these events:
 { event: "github.api.call", tool, owner, repo, correlationId }
@@ -1303,6 +1304,11 @@ GITHUB_API_BASE_URL=
 # Docker socket path. Default: /var/run/docker.sock
 # On Windows with Docker Desktop: npipe:////./pipe/docker_engine
 DOCKER_SOCKET_PATH=/var/run/docker.sock
+
+# Security note:
+# If the API server runs in a container, do NOT mount docker.sock into that container.
+# Run the orchestrator on a dedicated trusted worker host/service that has Docker access.
+# Runtime task containers still follow the "no host mounts" rule.
 
 # Name of the pre-built helmsman runtime image
 # Build with: docker build -f docker/Dockerfile.runtime -t helmsman-runtime:latest .
@@ -1347,7 +1353,7 @@ Add both packages to the feature routing table in `apps/docs/features/README.md`
 - **Parallel git operations across multiple repos** — single sequential operations only in Phase 1
 - **SSH tunneling / port forwarding** — high risk, deferred
 - **Interactive SSH sessions** — only non-interactive command execution for now (no PTY)
-- **Fine-grained iptables egress enforcement** — noted in network-policy.ts, deferred to Phase 2
+- **SSH key paste in chat UX** — disallowed for production mode; secure upload flow only
 
 ---
 
