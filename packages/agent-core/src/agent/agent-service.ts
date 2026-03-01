@@ -7,7 +7,8 @@ import {
 } from "@helmsman/shared";
 import { ShellExecuteTool, type ToolRegistry } from "@helmsman/tools";
 
-import { LLMProvider } from "../llm/provider.js";
+import { LLMMessage, LLMProvider } from "../llm/provider.js";
+import { ConversationMemoryStore, InMemoryConversationMemoryStore } from "./conversation-memory.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 
 export interface AgentService {
@@ -39,6 +40,7 @@ const sanitizeForUser = (text: string): string => {
   const withoutFencedToolBlocks = text
     .replace(/```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi, "")
     .replace(/\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}/gi, "")
+    .replace(/Tool\s+shell\.execute[\s\S]*?(?:approval\.|execution\.)/gi, "")
     .trim();
 
   if (!withoutFencedToolBlocks || TOOL_ARTIFACT_PATTERN.test(withoutFencedToolBlocks)) {
@@ -46,6 +48,19 @@ const sanitizeForUser = (text: string): string => {
   }
 
   return withoutFencedToolBlocks;
+};
+
+const didAssistantAskToProceed = (conversationHistory: readonly LLMMessage[]): boolean => {
+  for (let index = conversationHistory.length - 1; index >= 0; index -= 1) {
+    const message = conversationHistory[index];
+    if (message?.role !== "assistant") {
+      continue;
+    }
+
+    return /do you want me to proceed|want me to proceed|should i proceed|shall i proceed/i.test(message.content);
+  }
+
+  return false;
 };
 
 const shorten = (value: string, max: number): string => {
@@ -132,6 +147,39 @@ const isAwsInvalidChoiceError = (errorText: string): boolean => {
   return /aws:\s*error:\s*argument\s+operation:\s*Invalid choice/i.test(errorText);
 };
 
+const isCommandSubstitutionBlockedError = (errorText: string): boolean => {
+  return /Command substitution\s*\$\(\)\s*is blocked/i.test(errorText);
+};
+
+const formatIsoDate = (date: Date): string => {
+  return date.toISOString().slice(0, 10);
+};
+
+const rewriteCostExplorerDateSubstitutions = (command: string): string | null => {
+  if (!/\baws\s+ce\s+get-cost-and-usage\b/i.test(command)) {
+    return null;
+  }
+
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+  const startDate = formatIsoDate(monthStart);
+  const endDate = formatIsoDate(today);
+
+  const rewritten = command
+    .replace(/\$\([^)]*%Y-%m-01[^)]*\)/gi, startDate)
+    .replace(/\$\([^)]*%Y-%m-%d[^)]*\)/gi, endDate)
+    .replace(/`[^`]*%Y-%m-01[^`]*`/gi, startDate)
+    .replace(/`[^`]*%Y-%m-%d[^`]*`/gi, endDate);
+
+  if (rewritten === command) {
+    return null;
+  }
+
+  return rewritten;
+};
+
 const parseToolCallCandidate = (candidate: string): ParsedToolCall | null => {
   try {
     const parsed = JSON.parse(candidate) as {
@@ -189,22 +237,37 @@ const tryParseToolCall = (text: string): ParsedToolCall | null => {
   return null;
 };
 
+const rememberConversationTurn = (
+  memoryStore: ConversationMemoryStore,
+  conversationId: string,
+  userText: string,
+  assistantText: string,
+): void => {
+  memoryStore.appendMessages(conversationId, [
+    { role: "user", content: userText },
+    { role: "assistant", content: assistantText },
+  ]);
+};
+
 export class HelmsmanAgentService implements AgentService {
   private readonly llmProvider: LLMProvider;
   private readonly policyEngine?: PolicyEngine;
   private readonly auditService?: AuditService;
   private readonly toolRegistry?: ToolRegistry;
+  private readonly memoryStore: ConversationMemoryStore;
 
   public constructor(config: { 
     llmProvider: LLMProvider;
     policyEngine?: PolicyEngine;
     auditService?: AuditService;
     toolRegistry?: ToolRegistry;
+    memoryStore?: ConversationMemoryStore;
   }) {
     this.llmProvider = config.llmProvider;
     this.policyEngine = config.policyEngine;
     this.auditService = config.auditService;
     this.toolRegistry = config.toolRegistry;
+    this.memoryStore = config.memoryStore ?? new InMemoryConversationMemoryStore();
   }
 
   public async handleMessage(message: NormalizedMessage): Promise<AgentResponse> {
@@ -219,9 +282,13 @@ export class HelmsmanAgentService implements AgentService {
     const toolDefinitions = this.toolRegistry?.getAllDefinitions() ?? [];
     const systemPrompt = buildSystemPrompt(JSON.stringify(toolDefinitions));
 
+    const conversationId = `${message.platform}:${message.chatId}:${message.userId}`;
+    const conversationHistory = this.memoryStore.getMessages(conversationId);
+    const llmMessages: LLMMessage[] = [...conversationHistory, { role: "user", content: message.text }];
+
     const llmResult = await this.llmProvider.generate({
       systemPrompt,
-      messages: [{ role: "user", content: message.text }],
+      messages: llmMessages,
     });
 
     // 2. Log LLM response
@@ -234,21 +301,42 @@ export class HelmsmanAgentService implements AgentService {
 
     const parsedToolCall = tryParseToolCall(llmResult.text);
     if (!parsedToolCall) {
+      const plainTextResponse = sanitizeForUser(llmResult.text);
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, plainTextResponse);
+
       return {
         correlationId: message.correlationId,
         status: "success",
-        text: sanitizeForUser(llmResult.text),
+        text: plainTextResponse,
         metadata: {
           model: llmResult.model,
         },
       };
     }
 
-    if (parsedToolCall.toolName === "shell.execute" && isAmbiguousConfirmation(message.text)) {
+    if (
+      parsedToolCall.toolName === "shell.execute"
+      && isAmbiguousConfirmation(message.text)
+      && !didAssistantAskToProceed(conversationHistory)
+    ) {
+      const clarification = "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').";
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, clarification);
+
       return {
         correlationId: message.correlationId,
         status: "success",
-        text: "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').",
+        text: clarification,
+        metadata: {
+          model: llmResult.model,
+        },
+      };
+    }
+
+    if (parsedToolCall.toolName === "shell.execute" && typeof parsedToolCall.parameters.command !== "string") {
+      return {
+        correlationId: message.correlationId,
+        status: "success",
+        text: "I need a valid command target first. Please restate what you want to check in plain language.",
         metadata: {
           model: llmResult.model,
         },
@@ -257,10 +345,13 @@ export class HelmsmanAgentService implements AgentService {
 
     const tool = this.toolRegistry?.getTool(parsedToolCall.toolName);
     if (!tool) {
+      const toolMissingResponse = `Tool '${parsedToolCall.toolName}' is not registered.`;
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, toolMissingResponse);
+
       return {
         correlationId: message.correlationId,
         status: "error",
-        text: `Tool '${parsedToolCall.toolName}' is not registered.`,
+        text: toolMissingResponse,
         metadata: {
           model: llmResult.model,
         },
@@ -297,18 +388,24 @@ export class HelmsmanAgentService implements AgentService {
     });
 
     if (policyDecision.action === "deny") {
+      const deniedResponse = policyDecision.reason ?? "Policy denied this action.";
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, deniedResponse);
+
       return {
         correlationId: message.correlationId,
         status: "error",
-        text: policyDecision.reason ?? "Policy denied this action.",
+        text: deniedResponse,
       };
     }
 
     if (policyDecision.action === "require_approval") {
+      const pendingApprovalResponse = policyDecision.reason ?? "This action requires approval.";
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, pendingApprovalResponse);
+
       return {
         correlationId: message.correlationId,
         status: "pending_approval",
-        text: policyDecision.reason ?? "This action requires approval.",
+        text: pendingApprovalResponse,
         metadata: {
           toolName: parsedToolCall.toolName,
           parameters: parsedToolCall.parameters,
@@ -359,6 +456,26 @@ export class HelmsmanAgentService implements AgentService {
       }
     }
 
+    if (
+      !toolResult.success
+      && tool instanceof ShellExecuteTool
+      && typeof parsedToolCall.parameters.command === "string"
+      && isCommandSubstitutionBlockedError(toolResult.error ?? "")
+    ) {
+      const rewrittenCommand = rewriteCostExplorerDateSubstitutions(parsedToolCall.parameters.command);
+      if (rewrittenCommand && tool.classifyRisk(rewrittenCommand) === "read_only") {
+        const retryResult = await tool.execute({
+          ...parsedToolCall.parameters,
+          command: rewrittenCommand,
+        });
+
+        if (retryResult.success) {
+          parsedToolCall.parameters.command = rewrittenCommand;
+          toolResult = retryResult;
+        }
+      }
+    }
+
     await this.auditService?.log({
       type: "tool_execution",
       userId: message.userId,
@@ -370,10 +487,13 @@ export class HelmsmanAgentService implements AgentService {
     });
 
     if (!toolResult.success) {
+      const toolErrorResponse = sanitizeForUser(summarizeToolError(toolResult.error ?? "Tool execution failed."));
+      rememberConversationTurn(this.memoryStore, conversationId, message.text, toolErrorResponse);
+
       return {
         correlationId: message.correlationId,
         status: "error",
-        text: sanitizeForUser(summarizeToolError(toolResult.error ?? "Tool execution failed.")),
+        text: toolErrorResponse,
       };
     }
 
@@ -399,10 +519,13 @@ export class HelmsmanAgentService implements AgentService {
       };
     }
 
+    const assistantResponse = sanitizeForUser(finalAnswer.text);
+    rememberConversationTurn(this.memoryStore, conversationId, message.text, assistantResponse);
+
     return {
       correlationId: message.correlationId,
       status: "success",
-      text: sanitizeForUser(finalAnswer.text),
+      text: assistantResponse,
       metadata: {
         model: finalAnswer.model,
         toolName: parsedToolCall.toolName,

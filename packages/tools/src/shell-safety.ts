@@ -287,17 +287,18 @@ export function classifyCommandRisk(cmd: ParsedCommand): RiskTier {
     }
   }
 
+  // Check read-only before significant to avoid false positives from parameter names
+  // like Start=..., while command operation itself is get/list/describe.
+  for (const pattern of READ_ONLY_PATTERNS) {
+    if (pattern.test(raw)) {
+      return "read_only";
+    }
+  }
+
   // Check significant (write/mutate)
   for (const pattern of SIGNIFICANT_PATTERNS) {
     if (pattern.test(raw)) {
       return "significant";
-    }
-  }
-
-  // Check read-only
-  for (const pattern of READ_ONLY_PATTERNS) {
-    if (pattern.test(raw)) {
-      return "read_only";
     }
   }
 

@@ -25,6 +25,8 @@ const sanitizeAssistantText = (text: string): string => {
   const cleaned = text
     .replace(/```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi, "")
     .replace(/\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}/gi, "")
+    .replace(/Tool\s+shell\.execute\s+has\s+risk\s+tier\s+\w+\s+and\s+requires\s+explicit\s+approval\.?/gi, "This request needs your approval before I run it.")
+    .replace(/Tool\s+shell\.execute\s+executed\s+command\s+and\s+returned:\s*/gi, "")
     .trim();
 
   if (!cleaned) {

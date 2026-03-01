@@ -14,7 +14,7 @@ export class DefaultPolicyEngine implements PolicyEngine {
       case "destructive":
         return { 
           action: "require_approval", 
-          reason: `Tool ${request.toolName} has risk tier ${riskTier} and requires explicit approval.` 
+          reason: "This request can change infrastructure and requires your approval before execution." 
         };
       default:
         return { action: "deny", reason: "Unknown risk tier" };

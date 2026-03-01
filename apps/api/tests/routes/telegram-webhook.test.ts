@@ -245,4 +245,68 @@ describe("POST /webhook/telegram", () => {
     expect(sentMessages.length).toBe(1);
     expect(sentMessages[0]?.text).toContain("/approve ");
   });
+
+  it("should sanitize internal tool wording in pending approval response", async () => {
+    const sentMessages: { chatId: string; text: string }[] = [];
+
+    const sender: TelegramMessageSender = {
+      async sendTyping(): Promise<void> {
+        return;
+      },
+      async sendResponse(chatId: string, text: string): Promise<void> {
+        sentMessages.push({ chatId, text });
+      },
+    };
+
+    const agentService: TelegramAgentService = {
+      async handleMessage(): Promise<{
+        correlationId: string;
+        status: "pending_approval";
+        text: string;
+        metadata: Record<string, unknown>;
+      }> {
+        return {
+          correlationId: "corr-approval-2",
+          status: "pending_approval",
+          text: "Tool shell.execute has risk tier significant and requires explicit approval.",
+          metadata: {
+            toolName: "shell.execute",
+            parameters: { command: "aws ec2 stop-instances --instance-ids i-123" },
+          },
+        };
+      },
+    };
+
+    const app = createApp(baseEnv, {
+      telegram: {
+        dedupStore: new InMemoryDedupStore(),
+        sender,
+        agentService,
+      },
+    });
+    const baseUrl = await startAppServer(app);
+
+    const response = await fetch(`${baseUrl}/webhook/telegram`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": baseEnv.telegramWebhookSecret,
+      },
+      body: JSON.stringify({
+        update_id: 1005,
+        message: {
+          message_id: 14,
+          from: { id: 102, first_name: "Test User" },
+          chat: { id: 45, type: "private" },
+          date: 1_700_000_000,
+          text: "stop staging",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(sentMessages.length).toBe(1);
+    expect(sentMessages[0]?.text).not.toContain("Tool shell.execute");
+    expect(sentMessages[0]?.text).toContain("needs your approval");
+  });
 });

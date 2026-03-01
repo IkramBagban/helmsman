@@ -279,4 +279,11 @@ describe("classifyCommandRisk", () => {
     );
     expect(classifyCommandRisk(cmd)).toBe("significant");
   });
+
+  it("should classify cost explorer get-cost-and-usage with Start/End params as read_only", () => {
+    const cmd = parseCommand(
+      "aws ce get-cost-and-usage --time-period Start=2026-03-01,End=2026-03-31 --granularity MONTHLY --metrics UnblendedCost --output json",
+    );
+    expect(classifyCommandRisk(cmd)).toBe("read_only");
+  });
 });

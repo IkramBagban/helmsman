@@ -297,6 +297,75 @@ describe("HelmsmanAgentService", () => {
     expect(response.text.toLowerCase()).toContain("specific instruction");
   });
 
+  it("should allow yes confirmation when previous assistant asked to proceed", async () => {
+    const registry = new ToolRegistry();
+    let executeCalled = false;
+
+    registry.register({
+      definition: {
+        name: "shell.execute",
+        description: "shell executor",
+        parameters: { command: "string" },
+        riskTier: "read_only",
+      },
+      execute: async (): Promise<ToolExecutionResult> => {
+        executeCalled = true;
+        return { success: true, output: JSON.stringify([]) };
+      },
+    });
+
+    let generateCount = 0;
+    const service = new HelmsmanAgentService({
+      llmProvider: {
+        generate: async () => {
+          generateCount += 1;
+          if (generateCount === 1) {
+            return {
+              model: "test-model",
+              text: "Do you want me to proceed?",
+            };
+          }
+
+          return {
+            model: "test-model",
+            text: JSON.stringify({
+              type: "tool_call",
+              toolName: "shell.execute",
+              parameters: { command: "aws lambda list-functions --output json" },
+            }),
+          };
+        },
+      },
+      toolRegistry: registry,
+      policyEngine: {
+        evaluate: async () => ({ action: "allow" }),
+      },
+    });
+
+    await service.handleMessage({
+      platform: "telegram",
+      chatId: "chat-yes-1",
+      messageId: "message-1",
+      userId: "user-yes-1",
+      text: "Check my lambda functions",
+      timestamp: new Date(),
+      correlationId: "corr-yes-allow-1",
+    });
+
+    const response = await service.handleMessage({
+      platform: "telegram",
+      chatId: "chat-yes-1",
+      messageId: "message-2",
+      userId: "user-yes-1",
+      text: "Yes",
+      timestamp: new Date(),
+      correlationId: "corr-yes-allow-2",
+    });
+
+    expect(executeCalled).toBe(true);
+    expect(response.status).toBe("success");
+  });
+
   it("should use concise fallback summary when formatter LLM fails", async () => {
     let generateCount = 0;
     const registry = new ToolRegistry();
@@ -398,4 +467,54 @@ describe("HelmsmanAgentService", () => {
     expect(response.text.toLowerCase()).toContain("command was not valid");
     expect(response.text).not.toContain("valid choices are");
   });
+
+  it("should include prior turns in memory for follow-up messages", async () => {
+    const seenMessages: string[][] = [];
+
+    const service = new HelmsmanAgentService({
+      llmProvider: {
+        generate: async (params) => {
+          seenMessages.push(params.messages.map((message) => `${message.role}:${message.content}`));
+          if (seenMessages.length === 1) {
+            return {
+              model: "test-model",
+              text: "My name is Helmsman.",
+            };
+          }
+
+          return {
+            model: "test-model",
+            text: "You told me your name earlier.",
+          };
+        },
+      },
+    });
+
+    await service.handleMessage({
+      platform: "telegram",
+      chatId: "chat-1",
+      messageId: "message-1",
+      userId: "user-1",
+      text: "Remember your name is Helmsman",
+      timestamp: new Date(),
+      correlationId: "corr-memory-1",
+    });
+
+    const followUpResponse = await service.handleMessage({
+      platform: "telegram",
+      chatId: "chat-1",
+      messageId: "message-2",
+      userId: "user-1",
+      text: "What is your name?",
+      timestamp: new Date(),
+      correlationId: "corr-memory-2",
+    });
+
+    expect(seenMessages).toHaveLength(2);
+    expect(seenMessages[1]).toContain("user:Remember your name is Helmsman");
+    expect(seenMessages[1]).toContain("assistant:My name is Helmsman.");
+    expect(seenMessages[1]).toContain("user:What is your name?");
+    expect(followUpResponse.text).toContain("name");
+  });
+
 });

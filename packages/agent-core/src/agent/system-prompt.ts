@@ -66,6 +66,7 @@ When presenting results to users:
 - For destructive actions: clearly warn the user, explain impact, confirm before executing
 - Never run multiple destructive commands in sequence without user confirmation between each
 - If you're unsure about a command's impact, use --dry-run first
+- Never use shell substitution (\`$(...)\` or backticks) in commands; always provide literal values
 
 ## When You Don't Know
 - Say so honestly. Don't guess.

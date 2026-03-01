@@ -8,6 +8,43 @@ const hasMessagePayload = (update: TelegramUpdate): update is SupportedTelegramU
   return Boolean(update.message?.text && update.message.from.id && update.message.chat.id);
 };
 
+const normalizeTranscriptLikeText = (text: string): string => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const transcriptMarkers = /(ikram:|jack:)/i;
+  if (!transcriptMarkers.test(trimmed)) {
+    return trimmed;
+  }
+
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let lastUserLine = "";
+
+  for (const line of lines) {
+    const userMatch = line.match(/^ikram:\s*(.*)$/i);
+    if (userMatch) {
+      const content = userMatch[1]?.trim();
+      if (content) {
+        lastUserLine = content;
+      }
+      continue;
+    }
+
+    if (/^jack:/i.test(line)) {
+      continue;
+    }
+
+    if (lastUserLine && !/^\//.test(line)) {
+      // Continuation of the last Ikram block
+      lastUserLine = `${lastUserLine} ${line}`.trim();
+    }
+  }
+
+  return lastUserLine || trimmed;
+};
+
 export const parseTelegramUpdate = (
   payload: unknown,
   correlationId?: string,
@@ -21,7 +58,12 @@ export const parseTelegramUpdate = (
     return null;
   }
 
-  const text = update.message.text;
+  const rawText = update.message.text;
+  if (typeof rawText !== "string") {
+    return null;
+  }
+
+  const text = normalizeTranscriptLikeText(rawText);
   if (!text) {
     return null;
   }
