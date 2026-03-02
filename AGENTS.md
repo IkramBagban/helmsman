@@ -223,8 +223,6 @@ When assigned a feature, read `AGENTS.md` (this file) + the feature doc below:
 Install these skills for consistent, high-quality output:
 
 ```bash
-# Postgres optimization (already installed)
-# Skill: supabase-postgres-best-practices
 
 # Find more skills
 npx skills find "typescript strict patterns"

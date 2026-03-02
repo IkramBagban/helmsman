@@ -9,6 +9,8 @@
 
 | Feature | Doc | Package(s) | Complexity | Owner Agent |
 |---------|-----|------------|------------|-------------|
+| Parallel Execution Plan | [PARALLEL_AGENT_EXECUTION_PLAN.md](./PARALLEL_AGENT_EXECUTION_PLAN.md) | Cross-package | High | You (Coordinator) |
+| Security Hardening Program | [SECURITY_HARDENING_PROGRAM.md](./SECURITY_HARDENING_PROGRAM.md) | Cross-package | Very High | Security Coordinator |
 | Data Layer | [DATA_LAYER.md](./DATA_LAYER.md) | `packages/db`, `packages/shared` | Medium | Agent 1 |
 | Tool System | [TOOL_SYSTEM.md](./TOOL_SYSTEM.md) | `packages/tools` | Medium | Agent 2 |
 | Audit & Observability | [AUDIT_LOG.md](./AUDIT_LOG.md) | `packages/audit` | Low-Medium | Agent 3 |
