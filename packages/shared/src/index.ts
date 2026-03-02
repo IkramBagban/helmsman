@@ -155,3 +155,4 @@ export const isTelegramUpdate = (payload: unknown): payload is TelegramUpdate =>
 
   return true;
 };
+export { createFileLogger, type FileLogger, type FileLogEntry, type FileLoggerOptions } from "./file-logger.js";

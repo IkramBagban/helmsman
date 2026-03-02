@@ -1,6 +1,8 @@
 import type { ErrorRequestHandler } from "express";
 
-import { AppError } from "@helmsman/shared";
+import { AppError, createFileLogger } from "@helmsman/shared";
+
+const logger = createFileLogger({ component: "api" });
 
 export const errorHandlerMiddleware = (): ErrorRequestHandler => {
   return (error, request, response, _next) => {
@@ -9,9 +11,10 @@ export const errorHandlerMiddleware = (): ErrorRequestHandler => {
       ? error
       : new AppError("INTERNAL_SERVER_ERROR", "Unexpected server error", { error });
 
-    console.error("Request failed", {
+    logger.log("error", "request.failed", {
       correlationId,
       route: request.originalUrl || request.path,
+      method: request.method,
       code: safeError.code,
       message: safeError.message,
       context: safeError.context,

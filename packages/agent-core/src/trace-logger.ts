@@ -1,14 +1,17 @@
+import { createFileLogger } from "@helmsman/shared";
+
 type JsonLike = Record<string, unknown>;
 
 const SENSITIVE_KEY_PATTERN = /(token|secret|password|private.?key|api.?key|authorization|credential|cookie)/i;
 const MAX_STRING_LENGTH = 240;
 const MAX_DEPTH = 4;
+const fileLogger = createFileLogger({ component: "helmsman-agent" });
 
 const truncate = (value: string): string => {
   if (value.length <= MAX_STRING_LENGTH) {
     return value;
   }
-  return `${value.slice(0, MAX_STRING_LENGTH)}…(truncated)`;
+  return `${value.slice(0, MAX_STRING_LENGTH)}(truncated)`;
 };
 
 export const previewText = (value: unknown, maxLength: number = 180): string | undefined => {
@@ -18,7 +21,7 @@ export const previewText = (value: unknown, maxLength: number = 180): string | u
   if (value.length <= maxLength) {
     return value;
   }
-  return `${value.slice(0, maxLength)}…(truncated)`;
+  return `${value.slice(0, maxLength)}(truncated)`;
 };
 
 export const redactForLog = (value: unknown, depth: number = 0): unknown => {
@@ -68,6 +71,8 @@ export const logTrace = (
     timestamp: new Date().toISOString(),
     ...redactForLog(payload) as Record<string, unknown>,
   };
+
+  fileLogger.log(level, event, line);
 
   if (level === "error") {
     console.error(JSON.stringify(line));
