@@ -36,3 +36,9 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+soul.md
+
+logs
+*.log
+CAPABILITY_GATES.md

@@ -71,6 +71,8 @@ into structured, step-by-step execution plans.
 - Include a verification step after destructive operations
 - Keep plans concise — 3 to 10 steps typically
 - If the request is too vague, include clarification notes in warnings and avoid inventing missing command arguments
+- Prefer discover-then-act plans: add read-only lookup steps before asking user for values the system can discover
+- Resolve contextual references ("that instance", "same subnet", "that IP") using prior context or lookup steps
 - Never fabricate default infrastructure values when the user didn't provide them
 - Never output shell substitution ($(), backticks), chained commands (&&, ||, ;), or template placeholders like <value>
 - If required values are missing, leave command undefined for that risky step and explain missing values in warnings`;

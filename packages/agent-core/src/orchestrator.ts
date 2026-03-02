@@ -149,6 +149,82 @@ function buildClarificationFromInvalidCommand(
   return `I can set this up, but I need a few details first.${warningSection}`;
 }
 
+function summarizeDescription(description: string): string {
+  const lines = description
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("Step ") && !line.startsWith("📋") && !line.startsWith("Overall risk"));
+
+  return lines[0] ?? description.trim();
+}
+
+function formatApprovalMessage(input: {
+  role: CapabilityRole;
+  riskTier: string;
+  description: string;
+  command: string;
+  confirmInstruction: string;
+}): string {
+  const title = input.role === "commander"
+    ? "⚙️ Commander Action — Confirmation Required"
+    : "⚙️ Operator Action — Confirmation Required";
+
+  const riskLabel = input.riskTier === "destructive" ? "Destructive" : "Significant";
+  const whatThisDoes = summarizeDescription(input.description);
+
+  return [
+    title,
+    "",
+    "What this does:",
+    `- ${whatThisDoes}`,
+    `- Risk level: ${riskLabel}`,
+    "",
+    "Command (audit trail):",
+    `\`${input.command}\``,
+    "",
+    "To confirm, type:",
+    input.confirmInstruction,
+  ].join("\n");
+}
+
+function evaluateRecoveryResult(result: unknown): "success" | "error" | "unknown" {
+  const parsed = result as {
+    toolResults?: Array<{ toolName?: string; result?: { success?: boolean; error?: string; output?: string } }>;
+  };
+
+  const shellResults = (parsed.toolResults ?? []).filter((entry) => entry.toolName === "shell_execute");
+  if (shellResults.length === 0) {
+    return "unknown";
+  }
+
+  const lastShell = shellResults[shellResults.length - 1]?.result;
+  if (lastShell?.success === true) {
+    return "success";
+  }
+  if (lastShell?.success === false) {
+    return "error";
+  }
+  return "unknown";
+}
+
+function extractRecoveryErrors(result: unknown): string[] {
+  const parsed = result as {
+    toolResults?: Array<{ toolName?: string; result?: { success?: boolean; error?: string; output?: string } }>;
+  };
+
+  const shellResults = (parsed.toolResults ?? []).filter((entry) => entry.toolName === "shell_execute");
+  return shellResults
+    .filter((entry) => entry.result?.success === false)
+    .map((entry) => entry.result?.error ?? entry.result?.output ?? "unknown shell execution error")
+    .filter((error): error is string => typeof error === "string" && error.trim().length > 0);
+}
+
+function isLikelyQuestionForUser(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return normalized.includes("?")
+    || /\b(can you|could you|would you|please provide|please confirm|should i proceed|proceed\?)\b/.test(normalized);
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
@@ -396,6 +472,15 @@ export class HelmsmanOrchestrator {
       const execution = await shellTool.execute({ command: pendingAction.command });
 
       if (!execution.success) {
+        const recovered = await this.attemptAutomaticRecoveryAfterFailure(
+          pendingAction,
+          execution.error ?? execution.output ?? "unknown error",
+        );
+        if (recovered) {
+          this.recordTurn(pendingAction.chatId, "assistant", recovered.text);
+          return recovered;
+        }
+
         const response: AgentResponse = {
           correlationId: crypto.randomUUID(),
           status: "error",
@@ -444,6 +529,180 @@ export class HelmsmanOrchestrator {
       };
       this.recordTurn(pendingAction.chatId, "assistant", response.text);
       return response;
+    }
+  }
+
+  private async attemptAutomaticRecoveryAfterFailure(
+    pendingAction: PendingActionRecord,
+    failureReason: string,
+  ): Promise<AgentResponse | null> {
+    try {
+      let latestFailure = failureReason;
+      let lastAssistantText: string | null = null;
+
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        const recoveryPrompt = [
+          "An approved infrastructure action failed. Enter self-recovery mode.",
+          "",
+          `Attempt: ${attempt}/2`,
+          `Original approved intent: ${pendingAction.description}`,
+          `Original command: ${pendingAction.command}`,
+          `Current failure: ${latestFailure}`,
+          "",
+          "Rules:",
+          "1) Diagnose root cause from the error.",
+          "2) If recoverable, do read-only discovery first, then execute a corrected command.",
+          "3) Do not ask the user for values you can discover yourself.",
+          "4) If the only safe next move requires user judgment, ask exactly one concise question with one proposed next action.",
+          "5) Never request secrets (private keys/tokens/passwords).",
+          "6) Be transparent: briefly mention what failed and what you changed.",
+        ].join("\n");
+
+        const recoveryResult = await this.devopsAgent.generate(
+          this.buildPrompt(recoveryPrompt, this.getConversationContext(pendingAction.chatId)),
+          { maxSteps: MAX_STEPS },
+        );
+
+        lastAssistantText = recoveryResult.text;
+        const outcome = evaluateRecoveryResult(recoveryResult);
+        const observedErrors = extractRecoveryErrors(recoveryResult);
+
+        if (outcome === "success") {
+          return {
+            correlationId: crypto.randomUUID(),
+            status: "success",
+            text: truncateForTelegram(recoveryResult.text),
+          };
+        }
+
+        if (observedErrors.length > 0) {
+          latestFailure = observedErrors.join(" | ");
+        }
+      }
+
+      const finalText = (lastAssistantText ?? `Approved action failed: ${latestFailure}`).trim();
+      const finalStatus: AgentResponse["status"] = isLikelyQuestionForUser(finalText) ? "success" : "error";
+
+      return {
+        correlationId: crypto.randomUUID(),
+        status: finalStatus,
+        text: truncateForTelegram(finalText),
+      };
+    } catch (error) {
+      logTrace("approval.recovery.failed", {
+        approvalId: pendingAction.id,
+        runId: pendingAction.runId,
+        error: error instanceof Error ? error.message : String(error),
+      }, "warn");
+      return null;
+    }
+  }
+
+  private async generateApprovalMessage(input: {
+    role: CapabilityRole;
+    riskTier: string;
+    description: string;
+    command: string;
+    confirmInstruction: string;
+  }): Promise<string> {
+    const fallback = formatApprovalMessage(input);
+
+    const prompt = [
+      "Compose a concise approval/confirmation briefing for an infrastructure action.",
+      "",
+      `Role required: ${input.role}`,
+      `Risk tier: ${input.riskTier}`,
+      `Action description: ${input.description}`,
+      `Command (audit trail): ${input.command}`,
+      `Confirmation instruction: ${input.confirmInstruction}`,
+      "",
+      "Output requirements:",
+      "1) Explain what the action does in plain English.",
+      "2) Add context-aware consequences and risk notes relevant to this command.",
+      "3) If specific impact is unknown, say what is unknown without inventing numbers.",
+      "4) Include the exact confirmation instruction unchanged.",
+      "5) Keep command as secondary audit-trail detail.",
+    ].join("\n");
+
+    try {
+      const result = await this.responderAgent.generate(prompt);
+      const text = result.text?.trim();
+      if (!text || text.length === 0) {
+        return fallback;
+      }
+
+      if (!text.includes(input.confirmInstruction)) {
+        return fallback;
+      }
+
+      return truncateForTelegram(text);
+    } catch {
+      return fallback;
+    }
+  }
+
+  private async generateElicitationResponse(input: {
+    message: NormalizedMessage;
+    plan: Plan;
+    conversationContext?: string;
+    validation?: { valid: false; reason: string; missingValues?: string[] };
+  }): Promise<AgentResponse> {
+    const fallback = input.validation
+      ? buildClarificationFromInvalidCommand(input.plan, input.validation)
+      : buildClarificationPromptFromPlan(input.plan);
+
+    const planWarnings = (input.plan.warnings ?? []).filter((warning) => warning.trim().length > 0);
+    const missingFromValidation = (input.validation?.missingValues ?? []).filter((value) => value.trim().length > 0);
+    const missingContext = [
+      ...planWarnings.map((warning) => `- ${warning}`),
+      ...missingFromValidation.map((value) => `- ${value}`),
+    ];
+
+    const elicitationPrompt = [
+      "You are preparing a parameter-elicitation response before a risky infrastructure action.",
+      "",
+      `User request: ${input.message.text}`,
+      `Plan summary: ${input.plan.summary}`,
+      `Plan risk: ${input.plan.overallRisk}`,
+      input.validation ? `Validation issue: ${input.validation.reason}` : "Validation issue: missing executable risky command",
+      "",
+      "Known missing or ambiguous inputs:",
+      missingContext.length > 0 ? missingContext.join("\n") : "- none explicitly listed",
+      "",
+      "Response requirements:",
+      "1) Ask only for truly missing fields.",
+      "2) If something can be discovered with read-only checks, say you can fetch it automatically.",
+      "3) Suggest sensible defaults as optional suggestions, not assumptions.",
+      "4) Keep it concise and actionable in Telegram style.",
+      "5) Never include write/destructive commands in this response.",
+      "6) Ask as few questions as possible and group related inputs.",
+    ].join("\n");
+
+    try {
+      const result = await this.responderAgent.generate(
+        this.buildPrompt(elicitationPrompt, input.conversationContext),
+      );
+
+      const text = result.text?.trim();
+      if (!text) {
+        return {
+          correlationId: input.message.correlationId,
+          status: "success",
+          text: fallback,
+        };
+      }
+
+      return {
+        correlationId: input.message.correlationId,
+        status: "success",
+        text: truncateForTelegram(text),
+      };
+    } catch {
+      return {
+        correlationId: input.message.correlationId,
+        status: "success",
+        text: fallback,
+      };
     }
   }
 
@@ -538,11 +797,11 @@ export class HelmsmanOrchestrator {
     );
 
     if (isRiskyPlan && !riskyStep) {
-      return {
-        correlationId: message.correlationId,
-        status: "success",
-        text: buildClarificationPromptFromPlan(plan),
-      };
+      return await this.generateElicitationResponse({
+        message,
+        plan,
+        conversationContext,
+      });
     }
 
     if (riskyStep?.command) {
@@ -557,11 +816,12 @@ export class HelmsmanOrchestrator {
           missingValues: validation.missingValues,
         }, "info");
 
-        return {
-          correlationId: message.correlationId,
-          status: "success",
-          text: buildClarificationFromInvalidCommand(plan, validation),
-        };
+        return await this.generateElicitationResponse({
+          message,
+          plan,
+          conversationContext,
+          validation,
+        });
       }
 
       logTrace("handler.single_action.approval_required", {
@@ -633,11 +893,11 @@ export class HelmsmanOrchestrator {
       );
 
       if (!firstRiskyStep?.command) {
-        return {
-          correlationId: message.correlationId,
-          status: "success",
-          text: buildClarificationPromptFromPlan(plan),
-        };
+        return await this.generateElicitationResponse({
+          message,
+          plan,
+          conversationContext,
+        });
       }
 
       // Validate before routing to approval — placeholders → clarification, not dead-end
@@ -651,11 +911,12 @@ export class HelmsmanOrchestrator {
           missingValues: validation.missingValues,
         }, "info");
 
-        return {
-          correlationId: message.correlationId,
-          status: "success",
-          text: buildClarificationFromInvalidCommand(plan, validation),
-        };
+        return await this.generateElicitationResponse({
+          message,
+          plan,
+          conversationContext,
+          validation,
+        });
       }
 
       return await this.runWithApproval(
@@ -807,15 +1068,22 @@ export class HelmsmanOrchestrator {
       suspendedStep: "approval-gate",
     }, "warn");
 
-    const riskLabel = riskTier === "destructive" ? "🔴 DESTRUCTIVE" : "🟡 Significant";
     const confirmInstruction = requiredRole === "commander"
       ? `/confirm ${pendingAction.confirmationTarget}`
       : `/approve ${pendingAction.id}`;
 
+    const approvalText = await this.generateApprovalMessage({
+      role: requiredRole,
+      riskTier,
+      description,
+      command,
+      confirmInstruction,
+    });
+
     return {
       correlationId: message.correlationId,
       status: "pending_approval",
-      text: `${riskLabel} action detected.\n\n${description}\n\nCommand: \`${command}\`\n\nTo proceed, type exactly:\n${confirmInstruction}`,
+      text: approvalText,
       metadata: {
         approvalId: pendingAction.id,
         confirmationMode,
@@ -865,11 +1133,17 @@ export class HelmsmanOrchestrator {
   }
 
   private buildPrompt(userMessage: string, conversationContext?: string): string {
+    const today = new Date().toISOString().slice(0, 10);
+    const runtimeContext = [
+      `Runtime date (UTC): ${today}`,
+      "Autonomy: resolve relative dates and contextual resource references yourself before asking the user.",
+    ].join("\n");
+
     if (!conversationContext) {
-      return userMessage;
+      return `${runtimeContext}\n\n${userMessage}`;
     }
 
-    return `Conversation context:\n${conversationContext}\n\nLatest user message: ${userMessage}`;
+    return `${runtimeContext}\n\nConversation context:\n${conversationContext}\n\nLatest user message: ${userMessage}`;
   }
 
   private getConversationContext(chatId: string): string | undefined {

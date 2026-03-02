@@ -228,6 +228,66 @@ describe("HelmsmanOrchestrator", () => {
       expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
     });
 
+    it("should format pending approval message with plain-language summary", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "single_action",
+          confidence: 0.95,
+          reasoning: "User requested infra change",
+        },
+      }));
+
+      plannerAgent = createMockAgent(() => ({
+        object: {
+          summary: "Create an EC2 instance",
+          steps: [
+            {
+              order: 1,
+              description: "Launch a t2.micro instance in us-east-1",
+              tool: "shell_execute",
+              command: "aws ec2 run-instances --image-id ami-1234567890abcdef0 --instance-type t2.micro --count 1 --region us-east-1",
+              risk: "significant",
+            },
+          ],
+          overallRisk: "significant",
+        },
+      }));
+
+      responderAgent = createMockAgent(() => ({
+        text: "",
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const initial = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "create one ec2 instance",
+      });
+
+      expect(initial.status).toBe("pending_approval");
+      const activationId = initial.text.match(/\/activate\s+operator\s+([A-Z0-9]{6})/)?.[1];
+      expect(activationId).toBeDefined();
+
+      const activated = await orchestrator.handleActivation(
+        "operator",
+        activationId!,
+        "user-42",
+        "chat-42",
+      );
+
+      expect(activated.status).toBe("pending_approval");
+      expect(activated.text).toContain("Operator Action — Confirmation Required");
+      expect(activated.text).toContain("What this does:");
+      expect(activated.text).toContain("Command (audit trail):");
+      expect(activated.text).toContain("To confirm, type:");
+      expect(activated.text).toContain("/approve ");
+    });
+
     it("should ask for clarification when risky plan lacks executable command", async () => {
       routerAgent = createMockAgent(() => ({
         object: {
@@ -256,6 +316,11 @@ describe("HelmsmanOrchestrator", () => {
         },
       }));
 
+      responderAgent = createMockAgent(() => ({
+        text: "I can do this. Please confirm region and instance type. If you want, I can auto-discover your default VPC and subnet.",
+        toolResults: [],
+      }));
+
       orchestrator = new HelmsmanOrchestrator({
         routerAgent,
         devopsAgent,
@@ -269,11 +334,11 @@ describe("HelmsmanOrchestrator", () => {
       });
 
       expect(response.status).toBe("success");
-      expect(response.text).toContain("I can continue with this request");
-      expect(response.text).toContain("Please provide region");
-      expect(response.text).toContain("Please provide instance type");
+      expect(response.text).toContain("Please confirm region and instance type");
+      expect(response.text).toContain("auto-discover");
       expect(plannerAgent.generate).toHaveBeenCalledTimes(1);
       expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
+      expect(responderAgent.generate).toHaveBeenCalledTimes(1);
     });
 
     it("should ask for missing values when risky command has template placeholders", async () => {
@@ -306,6 +371,11 @@ describe("HelmsmanOrchestrator", () => {
         },
       }));
 
+      responderAgent = createMockAgent(() => ({
+        text: "I can proceed once you provide AMI ID and instance type. I can auto-detect region from your running EC2 instances if you want.",
+        toolResults: [],
+      }));
+
       orchestrator = new HelmsmanOrchestrator({
         routerAgent,
         devopsAgent,
@@ -320,11 +390,13 @@ describe("HelmsmanOrchestrator", () => {
 
       // Should route to clarification with plan warnings, not dead-end validation
       expect(response.status).toBe("success");
-      expect(response.text).toContain("need");
+      expect(response.text).toContain("provide AMI ID");
       expect(response.text).toContain("AMI ID");
       expect(response.text).toContain("instance type");
       expect(response.text).not.toContain("/approve");
       expect(response.text).not.toContain("/activate");
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
+      expect(responderAgent.generate).toHaveBeenCalledTimes(1);
     });
 
     it("should derive missing value names from placeholders when plan has no warnings", async () => {
@@ -352,6 +424,11 @@ describe("HelmsmanOrchestrator", () => {
         },
       }));
 
+      responderAgent = createMockAgent(() => ({
+        text: "Missing inputs: ami id and instance type. Optional default: t2.micro unless you prefer otherwise.",
+        toolResults: [],
+      }));
+
       orchestrator = new HelmsmanOrchestrator({
         routerAgent,
         devopsAgent,
@@ -369,6 +446,8 @@ describe("HelmsmanOrchestrator", () => {
       expect(response.text).toContain("ami id");
       expect(response.text).toContain("instance type");
       expect(response.text).not.toContain("/approve");
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
+      expect(responderAgent.generate).toHaveBeenCalledTimes(1);
     });
 
     it("should clarify when risky command has shell substitution", async () => {
@@ -397,6 +476,11 @@ describe("HelmsmanOrchestrator", () => {
         },
       }));
 
+      responderAgent = createMockAgent(() => ({
+        text: "I need the VPC ID as a literal value. I can fetch your default VPC automatically and continue.",
+        toolResults: [],
+      }));
+
       orchestrator = new HelmsmanOrchestrator({
         routerAgent,
         devopsAgent,
@@ -411,8 +495,10 @@ describe("HelmsmanOrchestrator", () => {
 
       // Should route to clarification instead of dead-end
       expect(response.status).toBe("success");
-      expect(response.text).toContain("need");
+      expect(response.text).toContain("VPC ID");
       expect(response.text).not.toContain("/approve");
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
+      expect(responderAgent.generate).toHaveBeenCalledTimes(1);
     });
 
     it("should execute low-risk multi_step plans immediately", async () => {
@@ -563,6 +649,93 @@ describe("HelmsmanOrchestrator", () => {
 
       expect(wrongUserResponse.status).toBe("error");
       expect(wrongUserResponse.text).toContain("not found");
+    });
+
+    it("should return success when recovery ends with a precise user question", async () => {
+      let recoveryCallCount = 0;
+      devopsAgent = createMockAgent(() => {
+        recoveryCallCount += 1;
+        return {
+          text: "I found the issue. I can proceed after one confirmation: should I use desired capacity 5 in us-east-1?",
+          toolResults: [],
+        };
+      });
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await (orchestrator as any).attemptAutomaticRecoveryAfterFailure(
+        {
+          id: "ABC123",
+          role: "operator",
+          userId: "user-42",
+          chatId: "chat-42",
+          runId: "run-1",
+          riskTier: "significant",
+          description: "Scale ASG",
+          command: "aws autoscaling update-auto-scaling-group --auto-scaling-group-name my-asg --desired-capacity 5 --region us-east-1",
+          confirmationMode: "approve_code",
+          confirmationTarget: "ABC123",
+          createdAtMs: Date.now(),
+          expiresAtMs: Date.now() + 60_000,
+        },
+        "ValidationError",
+      );
+
+      expect(response?.status).toBe("success");
+      expect(response?.text).toContain("should I use desired capacity 5");
+      expect(recoveryCallCount).toBe(2);
+    });
+
+    it("should stop recovery after success on second attempt", async () => {
+      let recoveryCallCount = 0;
+      devopsAgent = createMockAgent(() => {
+        recoveryCallCount += 1;
+        if (recoveryCallCount === 1) {
+          return {
+            text: "First fix attempt failed, trying a safer correction now.",
+            toolResults: [{ toolName: "shell_execute", result: { success: false, error: "ValidationError" } }],
+          };
+        }
+
+        return {
+          text: "Recovered successfully. The corrected command has been applied.",
+          toolResults: [{ toolName: "shell_execute", result: { success: true, output: "ok" } }],
+        };
+      });
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await (orchestrator as any).attemptAutomaticRecoveryAfterFailure(
+        {
+          id: "DEF456",
+          role: "operator",
+          userId: "user-42",
+          chatId: "chat-42",
+          runId: "run-2",
+          riskTier: "significant",
+          description: "Scale ASG",
+          command: "aws autoscaling update-auto-scaling-group --auto-scaling-group-name my-asg --desired-capacity 5 --region us-east-1",
+          confirmationMode: "approve_code",
+          confirmationTarget: "DEF456",
+          createdAtMs: Date.now(),
+          expiresAtMs: Date.now() + 60_000,
+        },
+        "ValidationError",
+      );
+
+      expect(response?.status).toBe("success");
+      expect(response?.text).toContain("Recovered successfully");
+      expect(recoveryCallCount).toBe(2);
     });
   });
 
