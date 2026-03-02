@@ -11,6 +11,9 @@ export interface ApiEnv {
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;
   readonly redisUrl?: string;
+  readonly awsKnowledgeMcpUrl?: string;
+  readonly awsKnowledgeMcpApiKey?: string;
+  readonly awsKnowledgeMcpTimeoutMs?: number;
 }
 
 const getRequired = (name: string): string => {
@@ -57,7 +60,16 @@ export const getEnv = (): ApiEnv => {
       ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
     geminiBaseUrl: process.env.GEMINI_BASE_URL,
     redisUrl: process.env.REDIS_URL,
+    awsKnowledgeMcpUrl: process.env.AWS_KNOWLEDGE_MCP_URL,
+    awsKnowledgeMcpApiKey: process.env.AWS_KNOWLEDGE_MCP_API_KEY,
+    awsKnowledgeMcpTimeoutMs: process.env.AWS_KNOWLEDGE_MCP_TIMEOUT_MS
+      ? Number(process.env.AWS_KNOWLEDGE_MCP_TIMEOUT_MS)
+      : undefined,
   };
+
+  if (env.awsKnowledgeMcpTimeoutMs !== undefined && (Number.isNaN(env.awsKnowledgeMcpTimeoutMs) || env.awsKnowledgeMcpTimeoutMs < 1000)) {
+    throw new AppError("ENV_INVALID", "AWS_KNOWLEDGE_MCP_TIMEOUT_MS must be a number >= 1000");
+  }
 
   return env;
 };

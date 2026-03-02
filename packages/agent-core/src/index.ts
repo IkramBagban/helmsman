@@ -48,6 +48,7 @@ export {
 
 // Tools (Mastra wrappers)
 export { shellExecuteTool, classifyShellCommandRisk } from "./tools/shell-execute.js";
+export { createAwsKnowledgeTool, normalizeAwsKnowledgeResponse, type AwsKnowledgeToolConfig } from "./tools/aws-knowledge.js";
 export { createMastraGitHubTools, wrapTypedTool, type GitHubToolsOptions } from "./tools/github-tools.js";
 export { createMastraDevopsTools, type DevopsToolsOptions } from "./tools/devops-tools.js";
 

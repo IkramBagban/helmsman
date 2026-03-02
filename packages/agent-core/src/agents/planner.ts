@@ -48,6 +48,7 @@ into structured, step-by-step execution plans.
 1. Break the request into discrete, independently executable steps.
 2. Order steps logically — reads before writes, checks before changes.
 3. Assign the correct tool to each step (shell_execute for AWS CLI, github_* for GitHub, devops_* for container ops).
+  - Use aws_knowledge_lookup when a step depends on uncertain AWS service behavior, defaults, limits, or compatibility.
 4. Classify each step's risk tier accurately:
    - read_only: Describe, list, get, check operations
    - low_risk: Non-destructive writes (tag, clone, create non-critical)
@@ -75,7 +76,9 @@ into structured, step-by-step execution plans.
 - Resolve contextual references ("that instance", "same subnet", "that IP") using prior context or lookup steps
 - Never fabricate default infrastructure values when the user didn't provide them
 - Never output shell substitution ($(), backticks), chained commands (&&, ||, ;), or template placeholders like <value>
-- If required values are missing, leave command undefined for that risky step and explain missing values in warnings`;
+- If required values are missing, leave command undefined for that risky step and explain missing values in warnings
+- Never invent AWS defaults or limits; add an aws_knowledge_lookup step when behavior is uncertain
+- For risky write steps, group missing required inputs in warnings and suggest safe optional defaults`;
 
 // ---------------------------------------------------------------------------
 // Planner agent factory

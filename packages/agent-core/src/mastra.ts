@@ -13,6 +13,7 @@ import { createRouterAgent } from "./agents/router.js";
 import { createPlannerAgent } from "./agents/planner.js";
 import { createResponderAgent } from "./agents/responder.js";
 import { shellExecuteTool } from "./tools/shell-execute.js";
+import { createAwsKnowledgeTool } from "./tools/aws-knowledge.js";
 import { createMastraGitHubTools } from "./tools/github-tools.js";
 import { createMastraDevopsTools } from "./tools/devops-tools.js";
 import { HelmsmanOrchestrator } from "./orchestrator.js";
@@ -31,6 +32,12 @@ export interface HelmsmanFactoryConfig {
   readonly githubBaseUrl?: string;
   /** Whether to include DevOps runtime tools (requires Docker) */
   readonly enableDevopsTools?: boolean;
+  /** Optional AWS Knowledge MCP endpoint for canonical AWS behavior lookups */
+  readonly awsKnowledgeMcpUrl?: string;
+  /** Optional bearer token for AWS Knowledge MCP endpoint */
+  readonly awsKnowledgeMcpApiKey?: string;
+  /** Optional timeout in milliseconds for AWS Knowledge MCP requests */
+  readonly awsKnowledgeMcpTimeoutMs?: number;
   /** Optional capability store for activation/approval state */
   readonly capabilityStore?: CapabilityStore;
 }
@@ -55,6 +62,14 @@ export async function createHelmsman(
   const tools: Record<string, any> = {
     shell_execute: shellExecuteTool,
   };
+
+  if (config?.awsKnowledgeMcpUrl) {
+    tools.aws_knowledge_lookup = createAwsKnowledgeTool({
+      endpointUrl: config.awsKnowledgeMcpUrl,
+      apiKey: config?.awsKnowledgeMcpApiKey,
+      timeoutMs: config?.awsKnowledgeMcpTimeoutMs,
+    });
+  }
 
   // Add GitHub tools
   if (config?.githubToken) {

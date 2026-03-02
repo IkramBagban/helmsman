@@ -75,6 +75,9 @@ export const createTelegramWebhookHandler = async (
       githubToken: process.env.GITHUB_TOKEN,
       githubBaseUrl: process.env.GITHUB_API_BASE_URL,
       enableDevopsTools: true,
+      awsKnowledgeMcpUrl: env.awsKnowledgeMcpUrl,
+      awsKnowledgeMcpApiKey: env.awsKnowledgeMcpApiKey,
+      awsKnowledgeMcpTimeoutMs: env.awsKnowledgeMcpTimeoutMs,
       capabilityStore,
     }));
 

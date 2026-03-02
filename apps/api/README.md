@@ -18,6 +18,10 @@ HTTP API for Telegram webhook intake and response delivery.
 - `OPENAI_BASE_URL` optional override
 - `GITHUB_TOKEN` optional, enables authenticated GitHub tool access and higher rate limits
 - `GITHUB_API_BASE_URL` optional override for GitHub Enterprise API
+- AWS Knowledge MCP options (optional, improves AWS reasoning and lowers hallucinations):
+  - `AWS_KNOWLEDGE_MCP_URL`
+  - `AWS_KNOWLEDGE_MCP_API_KEY`
+  - `AWS_KNOWLEDGE_MCP_TIMEOUT_MS` (default `12000`)
 - DevOps runtime options (optional, used by Docker-backed execution tools):
   - `HELMSMAN_RUNTIME_IMAGE`
   - `DOCKER_SOCKET_PATH`

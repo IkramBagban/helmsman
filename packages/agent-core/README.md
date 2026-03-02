@@ -53,6 +53,8 @@ import {
   // Tools
   shellExecuteTool,
   classifyShellCommandRisk,
+  createAwsKnowledgeTool,
+  normalizeAwsKnowledgeResponse,
   createMastraGitHubTools,
   createMastraDevopsTools,
 
@@ -69,6 +71,11 @@ The Mastra agents use `@ai-sdk/google` which reads `GOOGLE_GENERATIVE_AI_API_KEY
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GOOGLE_GENERATIVE_AI_API_KEY` | Yes | Google AI API key (or set `GEMINI_API_KEY` / `GOOGLE_API_KEY` in the API layer) |
+
+Optional AWS Knowledge MCP settings are passed via `createHelmsman({ ... })` config:
+- `awsKnowledgeMcpUrl`
+- `awsKnowledgeMcpApiKey`
+- `awsKnowledgeMcpTimeoutMs`
 
 ## Usage
 

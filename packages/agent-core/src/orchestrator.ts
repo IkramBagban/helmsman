@@ -225,6 +225,15 @@ function isLikelyQuestionForUser(text: string): boolean {
     || /\b(can you|could you|would you|please provide|please confirm|should i proceed|proceed\?)\b/.test(normalized);
 }
 
+function shouldForceQueryIntent(text: string): boolean {
+  const normalized = text.toLowerCase();
+  const looksLikeQuestion = normalized.includes("?")
+    || /\b(what|why|how|when|which|difference|compare|default|limit|policy|quota|best practice|recommended)\b/.test(normalized);
+  const awsTopic = /\b(aws|ec2|s3|iam|cloudfront|rds|vpc|lambda|eks|route53|cloudwatch|dynamodb|kms|ecr|ecs)\b/.test(normalized);
+
+  return looksLikeQuestion && awsTopic;
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
@@ -288,31 +297,36 @@ export class HelmsmanOrchestrator {
 
       // 1. Classify intent
       const intent = await classifyIntent(this.routerAgent, message.text, conversationContext);
+      const effectiveIntent =
+        intent.intent === "chat" && shouldForceQueryIntent(message.text)
+          ? { ...intent, intent: "query" as const, reasoning: `${intent.reasoning} | override: aws-question->query` }
+          : intent;
+
       logTrace("intent.classified", {
         correlationId: message.correlationId,
         chatId: message.chatId,
-        intent: intent.intent,
-        confidence: intent.confidence,
-        reasoning: intent.reasoning,
+        intent: effectiveIntent.intent,
+        confidence: effectiveIntent.confidence,
+        reasoning: effectiveIntent.reasoning,
       });
 
       // 2. Route to appropriate handler
       let response: AgentResponse;
-      switch (intent.intent) {
+      switch (effectiveIntent.intent) {
         case "chat":
-          response = await this.handleChat(message, intent, conversationContext);
+          response = await this.handleChat(message, effectiveIntent, conversationContext);
           break;
         case "query":
-          response = await this.handleQuery(message, intent, conversationContext);
+          response = await this.handleQuery(message, effectiveIntent, conversationContext);
           break;
         case "single_action":
-          response = await this.handleSingleAction(message, intent, conversationContext);
+          response = await this.handleSingleAction(message, effectiveIntent, conversationContext);
           break;
         case "multi_step":
-          response = await this.handleMultiStep(message, intent, conversationContext);
+          response = await this.handleMultiStep(message, effectiveIntent, conversationContext);
           break;
         default:
-          response = await this.handleQuery(message, intent, conversationContext);
+          response = await this.handleQuery(message, effectiveIntent, conversationContext);
           break;
       }
 
@@ -553,6 +567,7 @@ export class HelmsmanOrchestrator {
           "1) Diagnose root cause from the error.",
           "2) If recoverable, do read-only discovery first, then execute a corrected command.",
           "3) Do not ask the user for values you can discover yourself.",
+          "3.1) If the failure depends on uncertain AWS behavior/limits/defaults, call aws_knowledge_lookup before retrying.",
           "4) If the only safe next move requires user judgment, ask exactly one concise question with one proposed next action.",
           "5) Never request secrets (private keys/tokens/passwords).",
           "6) Be transparent: briefly mention what failed and what you changed.",
@@ -672,6 +687,7 @@ export class HelmsmanOrchestrator {
       "Response requirements:",
       "1) Ask only for truly missing fields.",
       "2) If something can be discovered with read-only checks, say you can fetch it automatically.",
+      "2.1) If uncertainty is about AWS service behavior/defaults/limits, state that you'll verify via aws_knowledge_lookup.",
       "3) Suggest sensible defaults as optional suggestions, not assumptions.",
       "4) Keep it concise and actionable in Telegram style.",
       "5) Never include write/destructive commands in this response.",
@@ -752,7 +768,15 @@ export class HelmsmanOrchestrator {
       chatId: message.chatId,
     });
 
-    const prompt = this.buildPrompt(message.text, conversationContext);
+    const queryPrompt = [
+      message.text,
+      "",
+      "Query policy:",
+      "- For AWS behavior/defaults/limits/policy questions, call aws_knowledge_lookup when available.",
+      "- Do not rely on memory for AWS defaults/limits when tool grounding is possible.",
+    ].join("\n");
+
+    const prompt = this.buildPrompt(queryPrompt, conversationContext);
     const result = await this.devopsAgent.generate(prompt, {
       maxSteps: MAX_STEPS,
     });
@@ -1137,6 +1161,7 @@ export class HelmsmanOrchestrator {
     const runtimeContext = [
       `Runtime date (UTC): ${today}`,
       "Autonomy: resolve relative dates and contextual resource references yourself before asking the user.",
+      "Source policy: use tools for facts; use aws_knowledge_lookup for AWS behavior/limits/defaults when uncertain.",
     ].join("\n");
 
     if (!conversationContext) {
