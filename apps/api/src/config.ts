@@ -33,7 +33,7 @@ export const getEnv = (): ApiEnv => {
     throw new AppError("ENV_INVALID", "NODE_ENV must be development, production, or test");
   }
 
-  const port = Number(process.env.PORT ?? "3000");
+  const port = Number(process.env.PORT ?? "3500");
   if (Number.isNaN(port) || port < 1 || port > 65535) {
     throw new AppError("ENV_INVALID", "PORT must be a valid TCP port number");
   }

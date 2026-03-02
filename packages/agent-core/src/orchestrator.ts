@@ -22,6 +22,7 @@ import { formatResponse } from "./agents/responder.js";
 import { classifyShellCommandRisk } from "./tools/shell-execute.js";
 import { logTrace, previewText } from "./trace-logger.js";
 import { infraWorkflow, approvalStep, type InfraWorkflowInput } from "./workflows/infra-workflow.js";
+import { detectPromptInjectionAttempt, PROMPT_INJECTION_REFUSAL } from "./security/prompt-injection.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -162,6 +163,26 @@ export class HelmsmanOrchestrator {
 
       this.recordTurn(message.chatId, "user", message.text);
       const conversationContext = this.getConversationContext(message.chatId);
+
+      const injectionCheck = detectPromptInjectionAttempt(message.text);
+      if (injectionCheck.blocked) {
+        logTrace("security.prompt_injection.blocked", {
+          correlationId: message.correlationId,
+          chatId: message.chatId,
+          userId: message.userId,
+          reason: injectionCheck.reason ?? "matched_known_pattern",
+          textPreview: previewText(message.text),
+        }, "warn");
+
+        const blockedResponse: AgentResponse = {
+          correlationId: message.correlationId,
+          status: "error",
+          text: PROMPT_INJECTION_REFUSAL,
+        };
+
+        this.recordTurn(message.chatId, "assistant", blockedResponse.text);
+        return blockedResponse;
+      }
 
       // 1. Classify intent
       const intent = await classifyIntent(this.routerAgent, message.text, conversationContext);
