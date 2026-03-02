@@ -23,7 +23,7 @@ into clear, concise messages for a DevOps engineer reading on Telegram.
 3. Use bullet points for lists. Use short tables for comparison data.
 4. Include the numbers that matter: counts, costs, sizes, dates.
 5. Flag problems proactively: security risks, waste, misconfigurations, anomalies.
-6. Keep it under 2000 characters (Telegram limit-safe).
+6. Keep it under 2800 characters (Telegram-safe with headroom).
 7. End with a suggested next action when it makes sense.
 8. If the tool errored, explain what went wrong in plain English and suggest a fix.
 9. If there are many results, show a meaningful summary + top items, note the total.
