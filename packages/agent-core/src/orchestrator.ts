@@ -19,10 +19,15 @@ import type { IntentClassification } from "./agents/router.js";
 import { classifyIntent } from "./agents/router.js";
 import { generatePlan, type Plan } from "./agents/planner.js";
 import { formatResponse } from "./agents/responder.js";
-import { classifyShellCommandRisk } from "./tools/shell-execute.js";
 import { logTrace, previewText } from "./trace-logger.js";
-import { infraWorkflow, approvalStep, type InfraWorkflowInput } from "./workflows/infra-workflow.js";
 import { detectPromptInjectionAttempt, PROMPT_INJECTION_REFUSAL } from "./security/prompt-injection.js";
+import { ShellExecuteTool, parseCommand, validateCommand } from "@helmsman/tools";
+import {
+  InMemoryCapabilityStore,
+  type CapabilityRole,
+  type CapabilityStore,
+  type PendingActionRecord,
+} from "./capability-store.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,22 +38,24 @@ export interface HelmsmanConfig {
   readonly devopsAgent: Agent;
   readonly plannerAgent: Agent;
   readonly responderAgent: Agent;
-}
-
-export interface PendingApproval {
-  readonly runId: string;
-  readonly userId: string;
-  readonly chatId: string;
-  readonly command: string;
-  readonly riskTier: string;
-  readonly description?: string;
-  readonly message: string;
-  readonly createdAt: Date;
+  readonly capabilityStore?: CapabilityStore;
 }
 
 interface ConversationTurn {
   readonly role: "user" | "assistant";
   readonly text: string;
+}
+
+interface PendingActivationContinuation {
+  readonly role: CapabilityRole;
+  readonly activationId: string;
+  readonly userId: string;
+  readonly chatId: string;
+  readonly command: string;
+  readonly riskTier: string;
+  readonly description: string;
+  readonly correlationId: string;
+  readonly createdAtMs: number;
 }
 
 /** Max characters in a final response — Telegram-safe. */
@@ -57,41 +64,10 @@ const MAX_RESPONSE_LENGTH = 3000;
 const MAX_STEPS = 8;
 /** Max short-term conversation turns retained in-memory per chat. */
 const MAX_HISTORY_TURNS = 8;
+/** Max age for in-memory activation continuations. */
+const PENDING_CONTEXT_TTL_MS = 15 * 60 * 1000;
 
-// ---------------------------------------------------------------------------
-// In-memory store for pending workflow runs (replaced by persistent store later)
-// ---------------------------------------------------------------------------
-
-const pendingApprovals = new Map<string, { runId: string; approval: PendingApproval }>();
-
-export function getPendingApproval(approvalId: string): PendingApproval | undefined {
-  const pending = pendingApprovals.get(approvalId);
-  if (!pending) return undefined;
-
-  // Expire after 15 minutes
-  const now = Date.now();
-  if (now - pending.approval.createdAt.getTime() > 15 * 60 * 1000) {
-    pendingApprovals.delete(approvalId);
-    return undefined;
-  }
-
-  return pending.approval;
-}
-
-export function consumePendingApproval(approvalId: string): { runId: string; approval: PendingApproval } | undefined {
-  const pending = pendingApprovals.get(approvalId);
-  if (!pending) return undefined;
-
-  // Expire after 15 minutes
-  const now = Date.now();
-  if (now - pending.approval.createdAt.getTime() > 15 * 60 * 1000) {
-    pendingApprovals.delete(approvalId);
-    return undefined;
-  }
-
-  pendingApprovals.delete(approvalId);
-  return pending;
-}
+const shellTool = new ShellExecuteTool();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -100,10 +76,6 @@ export function consumePendingApproval(approvalId: string): { runId: string; app
 function truncateForTelegram(text: string): string {
   if (text.length <= MAX_RESPONSE_LENGTH) return text;
   return `${text.slice(0, MAX_RESPONSE_LENGTH)}\n\n…(truncated)`;
-}
-
-function generateApprovalId(): string {
-  return crypto.randomUUID().slice(0, 8);
 }
 
 function summarizeAgentRun(result: unknown): Record<string, unknown> {
@@ -126,6 +98,57 @@ function summarizeAgentRun(result: unknown): Record<string, unknown> {
   };
 }
 
+function buildClarificationPromptFromPlan(plan: Plan): string {
+  const warnings = (plan.warnings ?? []).filter((warning) => warning.trim().length > 0);
+  const warningSection = warnings.length > 0
+    ? `\n\nWhat I still need from you:\n${warnings.map((warning) => `- ${warning}`).join("\n")}`
+    : "\n\nPlease share the missing parameters and I’ll continue.";
+
+  return `I can continue with this request, but I need a bit more detail before running any risky command.${warningSection}`;
+}
+
+function validateApprovalCommand(command: string): { valid: true } | { valid: false; reason: string; missingValues?: string[] } {
+  const hasTemplatePlaceholder = /<[a-z_][a-z0-9_]*>/i.test(command);
+  if (hasTemplatePlaceholder) {
+    const placeholders = command.match(/<[a-z_][a-z0-9_]*>/gi) ?? [];
+    const missing = placeholders.map((p) => p.replace(/[<>]/g, "").replace(/_/g, " "));
+    return {
+      valid: false,
+      reason: "placeholder",
+      missingValues: missing,
+    };
+  }
+
+  const parsed = parseCommand(command);
+  const validation = validateCommand(parsed);
+  if (!validation.valid) {
+    return {
+      valid: false,
+      reason: validation.reason ?? "command failed safety validation",
+    };
+  }
+
+  return { valid: true };
+}
+
+function buildClarificationFromInvalidCommand(
+  plan: Plan,
+  validation: { valid: false; reason: string; missingValues?: string[] },
+): string {
+  // Merge plan warnings with placeholder-derived missing values
+  const planWarnings = (plan.warnings ?? []).filter((w) => w.trim().length > 0);
+  const placeholderWarnings = (validation.missingValues ?? []).map((v) => `What ${v} should I use?`);
+
+  // Deduplicate: prefer plan warnings if they exist, otherwise use placeholder-derived ones
+  const warnings = planWarnings.length > 0 ? planWarnings : placeholderWarnings;
+
+  const warningSection = warnings.length > 0
+    ? `\n\nWhat I still need from you:\n${warnings.map((w) => `- ${w}`).join("\n")}`
+    : "\n\nPlease share the missing parameters and I'll continue.";
+
+  return `I can set this up, but I need a few details first.${warningSection}`;
+}
+
 // ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
@@ -135,13 +158,16 @@ export class HelmsmanOrchestrator {
   private readonly devopsAgent: Agent;
   private readonly plannerAgent: Agent;
   private readonly responderAgent: Agent;
+  private readonly capabilityStore: CapabilityStore;
   private readonly conversationHistory = new Map<string, ConversationTurn[]>();
+  private readonly pendingActivationContinuations = new Map<string, PendingActivationContinuation>();
 
   constructor(config: HelmsmanConfig) {
     this.routerAgent = config.routerAgent;
     this.devopsAgent = config.devopsAgent;
     this.plannerAgent = config.plannerAgent;
     this.responderAgent = config.responderAgent;
+    this.capabilityStore = config.capabilityStore ?? new InMemoryCapabilityStore();
   }
 
   /**
@@ -249,9 +275,13 @@ export class HelmsmanOrchestrator {
       chatId,
     });
 
-    const pending = consumePendingApproval(approvalId);
+    const pendingAction = await this.capabilityStore.consumePendingActionByCode({
+      userId,
+      chatId,
+      value: approvalId,
+    });
 
-    if (!pending) {
+    if (!pendingAction) {
       return {
         correlationId: crypto.randomUUID(),
         status: "error",
@@ -259,93 +289,160 @@ export class HelmsmanOrchestrator {
       };
     }
 
-    if (pending.approval.userId !== userId || pending.approval.chatId !== chatId) {
+    return await this.resumePendingAction(pendingAction, true);
+  }
+
+  async handleConfirmation(target: string, userId: string, chatId: string): Promise<AgentResponse> {
+    const pendingAction = await this.capabilityStore.consumePendingActionByTarget({
+      userId,
+      chatId,
+      value: target.trim(),
+    });
+
+    if (!pendingAction) {
       return {
         correlationId: crypto.randomUUID(),
         status: "error",
-        text: "This approval request doesn't belong to you.",
+        text: "Confirmation target not found, expired, or already used.",
       };
     }
 
-    // Resume the workflow with approval
+    return await this.resumePendingAction(pendingAction, true);
+  }
+
+  async handleActivation(
+    role: CapabilityRole,
+    activationId: string,
+    userId: string,
+    chatId: string,
+  ): Promise<AgentResponse> {
+    const activation = await this.capabilityStore.consumeActivation({
+      role,
+      activationId: activationId.toUpperCase(),
+      userId,
+      chatId,
+    });
+
+    if (!activation) {
+      return {
+        correlationId: crypto.randomUUID(),
+        status: "error",
+        text: "Activation request not found, expired, already used, or not owned by you.",
+      };
+    }
+
+    const state = await this.capabilityStore.activateRole({ role, userId, chatId });
+    const expiryMs = role === "operator" ? state.operator.expiresAtMs : state.commander.expiresAtMs;
+    const expiryText = expiryMs
+      ? new Date(expiryMs).toISOString().replace("T", " ").replace(".000Z", " UTC")
+      : "(unknown)";
+
+    const continuation = this.consumeActivationContinuation(role, activationId.toUpperCase(), userId, chatId);
+    if (!continuation) {
+      return {
+        correlationId: crypto.randomUUID(),
+        status: "success",
+        text: `${role === "operator" ? "Operator" : "Commander"} access is active until ${expiryText}.`,
+      };
+    }
+
+    const continuationMessage: NormalizedMessage = {
+      platform: "telegram",
+      chatId,
+      messageId: `activation-${activationId.toUpperCase()}`,
+      userId,
+      text: continuation.description,
+      timestamp: new Date(),
+      correlationId: continuation.correlationId,
+    };
+
+    const nextStep = await this.runWithApproval(
+      continuationMessage,
+      continuation.command,
+      continuation.riskTier,
+      continuation.description,
+    );
+
+    return {
+      correlationId: nextStep.correlationId,
+      status: nextStep.status,
+      text: nextStep.text,
+      metadata: nextStep.metadata,
+    };
+  }
+
+  private async resumePendingAction(
+    pendingAction: PendingActionRecord,
+    approved: boolean,
+  ): Promise<AgentResponse> {
+    if (!approved) {
+      return {
+        correlationId: crypto.randomUUID(),
+        status: "error",
+        text: "Action was not approved.",
+      };
+    }
+
     try {
-      const run = await infraWorkflow.createRun({ runId: pending.runId });
       logTrace("approval.resume.started", {
-        approvalId,
-        runId: pending.runId,
-        riskTier: pending.approval.riskTier,
-        userId,
-        chatId,
-      });
-      const result = await run.resume({
-        step: approvalStep,
-        resumeData: { approved: true },
+        approvalId: pendingAction.id,
+        runId: pendingAction.runId,
+        riskTier: pendingAction.riskTier,
+        userId: pendingAction.userId,
+        chatId: pendingAction.chatId,
+        executionMode: "direct-shell",
       });
 
-      if (result.status === "success") {
-        const output = result.result as { success: boolean; output: string; error?: string };
-        if (output.success) {
-          // Format via responder
-          const formatted = await formatResponse(
-            this.responderAgent,
-            output.output,
-            pending.approval.description ?? pending.approval.command,
-          );
-          const response: AgentResponse = {
-            correlationId: crypto.randomUUID(),
-            status: "success",
-            text: truncateForTelegram(formatted),
-          };
-          logTrace("approval.resume.completed", {
-            approvalId,
-            runId: pending.runId,
-            status: response.status,
-            responsePreview: previewText(response.text),
-          });
-          this.recordTurn(chatId, "assistant", response.text);
-          return response;
-        }
+      const execution = await shellTool.execute({ command: pendingAction.command });
 
+      if (!execution.success) {
         const response: AgentResponse = {
           correlationId: crypto.randomUUID(),
           status: "error",
-          text: `Approved action failed: ${output.error ?? "unknown error"}`,
+          text: `Approved action failed: ${execution.error ?? execution.output ?? "unknown error"}`,
         };
         logTrace("approval.resume.completed", {
-          approvalId,
-          runId: pending.runId,
+          approvalId: pendingAction.id,
+          runId: pendingAction.runId,
           status: response.status,
-          error: output.error ?? "unknown error",
+          error: execution.error ?? "unknown error",
         }, "warn");
-        this.recordTurn(chatId, "assistant", response.text);
+        this.recordTurn(pendingAction.chatId, "assistant", response.text);
         return response;
       }
 
+      const formatted = await formatResponse(
+        this.responderAgent,
+        execution.output,
+        pendingAction.description ?? pendingAction.command,
+      );
       const response: AgentResponse = {
         correlationId: crypto.randomUUID(),
-        status: "error",
-        text: "Workflow completed with unexpected status.",
+        status: "success",
+        text: truncateForTelegram(formatted),
       };
-      logTrace("approval.resume.unexpected-status", {
-        approvalId,
-        runId: pending.runId,
-        workflowStatus: result.status,
-      }, "warn");
-      this.recordTurn(chatId, "assistant", response.text);
+      logTrace("approval.resume.completed", {
+        approvalId: pendingAction.id,
+        runId: pendingAction.runId,
+        status: response.status,
+        responsePreview: previewText(response.text),
+      });
+      this.recordTurn(pendingAction.chatId, "assistant", response.text);
       return response;
     } catch (error) {
       logTrace("approval.resume.failed", {
-        approvalId,
-        userId,
-        chatId,
+        approvalId: pendingAction.id,
+        userId: pendingAction.userId,
+        chatId: pendingAction.chatId,
         error: error instanceof Error ? error.message : String(error),
       }, "error");
+
       const response: AgentResponse = {
         correlationId: crypto.randomUUID(),
         status: "error",
         text: "Failed to execute the approved action. Please try again.",
       };
-      this.recordTurn(chatId, "assistant", response.text);
+      this.recordTurn(pendingAction.chatId, "assistant", response.text);
       return response;
     }
   }
@@ -431,7 +528,58 @@ export class HelmsmanOrchestrator {
       chatId: message.chatId,
     });
 
-    // Let the DevOps agent attempt the action with tools
+    const plannerPrompt = this.buildPrompt(message.text, conversationContext);
+    const plan = await generatePlan(this.plannerAgent, plannerPrompt);
+
+    const isRiskyPlan = plan.overallRisk === "significant" || plan.overallRisk === "destructive";
+
+    const riskyStep = plan.steps.find(
+      (step) => (step.risk === "significant" || step.risk === "destructive") && typeof step.command === "string" && step.command.trim().length > 0,
+    );
+
+    if (isRiskyPlan && !riskyStep) {
+      return {
+        correlationId: message.correlationId,
+        status: "success",
+        text: buildClarificationPromptFromPlan(plan),
+      };
+    }
+
+    if (riskyStep?.command) {
+      // Validate before routing to approval — placeholders → clarification, not dead-end
+      const validation = validateApprovalCommand(riskyStep.command);
+      if (!validation.valid) {
+        logTrace("handler.single_action.incomplete_command", {
+          correlationId: message.correlationId,
+          chatId: message.chatId,
+          command: riskyStep.command,
+          reason: validation.reason,
+          missingValues: validation.missingValues,
+        }, "info");
+
+        return {
+          correlationId: message.correlationId,
+          status: "success",
+          text: buildClarificationFromInvalidCommand(plan, validation),
+        };
+      }
+
+      logTrace("handler.single_action.approval_required", {
+        correlationId: message.correlationId,
+        chatId: message.chatId,
+        command: riskyStep.command,
+        risk: riskyStep.risk,
+      }, "warn");
+
+      return await this.runWithApproval(
+        message,
+        riskyStep.command,
+        riskyStep.risk,
+        `${plan.summary}\nStep: ${riskyStep.description}`,
+      );
+    }
+
+    // For non-risky actions, execute with tools.
     const prompt = this.buildPrompt(message.text, conversationContext);
     const result = await this.devopsAgent.generate(prompt, {
       maxSteps: MAX_STEPS,
@@ -442,33 +590,6 @@ export class HelmsmanOrchestrator {
       chatId: message.chatId,
       ...summarizeAgentRun(result),
     });
-
-    // Check if any tool call involves a risky command
-    // Look for shell_execute calls in the tool results
-    const toolResults = result.toolResults ?? [];
-    for (const toolResult of toolResults) {
-      const tr = toolResult as { toolName?: string; args?: Record<string, unknown>; result?: Record<string, unknown> };
-      if (tr.toolName === "shell_execute" && tr.args && typeof tr.args.command === "string") {
-        const risk = classifyShellCommandRisk(tr.args.command);
-        if (risk === "significant" || risk === "destructive") {
-          logTrace("handler.single_action.approval_required", {
-            correlationId: message.correlationId,
-            chatId: message.chatId,
-            command: tr.args.command,
-            risk,
-          }, "warn");
-          // The agent already ran the command through native tool calling,
-          // but our shell_execute wrapper checks safety rules.
-          // For approval flow, we use the workflow instead.
-          return await this.runWithApproval(
-            message,
-            tr.args.command,
-            risk,
-            `${message.text}`,
-          );
-        }
-      }
-    }
 
     return {
       correlationId: message.correlationId,
@@ -505,49 +626,44 @@ export class HelmsmanOrchestrator {
     // Format the plan for the user
     const planText = this.formatPlan(plan);
 
-    // If the plan has significant or destructive steps, require approval
+    // If the plan has significant or destructive steps, require approval before execution.
     if (plan.overallRisk === "significant" || plan.overallRisk === "destructive") {
-      const approvalId = generateApprovalId();
+      const firstRiskyStep = plan.steps.find(
+        (step) => (step.risk === "significant" || step.risk === "destructive") && typeof step.command === "string" && step.command.trim().length > 0,
+      );
 
-      pendingApprovals.set(approvalId, {
-        runId: crypto.randomUUID(),
-        approval: {
-          runId: crypto.randomUUID(),
-          userId: message.userId,
+      if (!firstRiskyStep?.command) {
+        return {
+          correlationId: message.correlationId,
+          status: "success",
+          text: buildClarificationPromptFromPlan(plan),
+        };
+      }
+
+      // Validate before routing to approval — placeholders → clarification, not dead-end
+      const validation = validateApprovalCommand(firstRiskyStep.command);
+      if (!validation.valid) {
+        logTrace("handler.multi_step.incomplete_command", {
+          correlationId: message.correlationId,
           chatId: message.chatId,
-          command: JSON.stringify(plan.steps.map((s) => s.command ?? s.description)),
-          riskTier: plan.overallRisk,
-          description: plan.summary,
-          message: planText,
-          createdAt: new Date(),
-        },
-      });
+          command: firstRiskyStep.command,
+          reason: validation.reason,
+          missingValues: validation.missingValues,
+        }, "info");
 
-      logTrace("handler.multi_step.approval_created", {
-        correlationId: message.correlationId,
-        chatId: message.chatId,
-        approvalId,
-        overallRisk: plan.overallRisk,
-        stepCount: plan.steps.length,
-      }, "warn");
+        return {
+          correlationId: message.correlationId,
+          status: "success",
+          text: buildClarificationFromInvalidCommand(plan, validation),
+        };
+      }
 
-      return {
-        correlationId: message.correlationId,
-        status: "pending_approval",
-        text: `${planText}\n\nReply with /approve ${approvalId} to execute this plan.`,
-        plan: {
-          id: approvalId,
-          summary: plan.summary,
-          steps: plan.steps.map((s) => ({
-            order: s.order,
-            description: s.description,
-            tool: s.tool,
-            risk: s.risk,
-          })),
-          riskTier: plan.overallRisk as RiskTier,
-          estimatedDuration: plan.estimatedDuration,
-        },
-      };
+      return await this.runWithApproval(
+        message,
+        firstRiskyStep.command,
+        firstRiskyStep.risk,
+        `${plan.summary}\nStep ${firstRiskyStep.order}: ${firstRiskyStep.description}\n\n${planText}`,
+      );
     }
 
     // Low risk plan — execute immediately via DevOps agent
@@ -582,6 +698,82 @@ export class HelmsmanOrchestrator {
     riskTier: string,
     description: string,
   ): Promise<AgentResponse> {
+    this.cleanupEphemeralState();
+
+    // Defense-in-depth: command should already be validated upstream.
+    // If we still reach here with an invalid command, log a warning and clarify.
+    const commandValidation = validateApprovalCommand(command);
+    if (!commandValidation.valid) {
+      logTrace("workflow.approval.invalid_command_reached", {
+        correlationId: message.correlationId,
+        chatId: message.chatId,
+        userId: message.userId,
+        command,
+        reason: commandValidation.reason,
+      }, "warn");
+      return {
+        correlationId: message.correlationId,
+        status: "success",
+        text: `I need a few more details before I can run this safely.\n\nThe command has issues: ${commandValidation.reason}.\nPlease provide the missing values and I'll continue.`,
+      };
+    }
+
+    const requiredRole: CapabilityRole = riskTier === "destructive" ? "commander" : "operator";
+    const roleState = await this.capabilityStore.getRoleState(message.userId, message.chatId);
+
+    const operatorActive = roleState.operator.active;
+    const commanderActive = roleState.commander.active;
+
+    if (!operatorActive && (requiredRole === "operator" || requiredRole === "commander")) {
+      const activation = await this.capabilityStore.createActivation({
+        role: "operator",
+        userId: message.userId,
+        chatId: message.chatId,
+      });
+
+      this.rememberActivationContinuation({
+        role: "operator",
+        activationId: activation.id,
+        userId: message.userId,
+        chatId: message.chatId,
+        command,
+        riskTier,
+        description,
+        correlationId: message.correlationId,
+      });
+
+      return {
+        correlationId: message.correlationId,
+        status: "pending_approval",
+        text: `Before I can run this safely, I need Operator access enabled for you.\n\nPlease send:\n/activate operator ${activation.id}\n\nI’ll continue automatically after that.`,
+      };
+    }
+
+    if (requiredRole === "commander" && !commanderActive) {
+      const activation = await this.capabilityStore.createActivation({
+        role: "commander",
+        userId: message.userId,
+        chatId: message.chatId,
+      });
+
+      this.rememberActivationContinuation({
+        role: "commander",
+        activationId: activation.id,
+        userId: message.userId,
+        chatId: message.chatId,
+        command,
+        riskTier,
+        description,
+        correlationId: message.correlationId,
+      });
+
+      return {
+        correlationId: message.correlationId,
+        status: "pending_approval",
+        text: `This is a destructive action, so Commander access is required first.\n\nPlease send:\n/activate commander ${activation.id}\n\nI’ll continue automatically after that.`,
+      };
+    }
+
     logTrace("workflow.approval.start", {
       correlationId: message.correlationId,
       chatId: message.chatId,
@@ -591,102 +783,45 @@ export class HelmsmanOrchestrator {
       description,
     }, "warn");
 
-    const input: InfraWorkflowInput = {
-      command,
-      riskTier,
+    const confirmationMode = requiredRole === "commander" ? "confirm_target" : "approve_code";
+    const confirmationTarget = crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
+
+    const pendingAction = await this.capabilityStore.createPendingAction({
+      role: requiredRole,
       userId: message.userId,
       chatId: message.chatId,
+      runId: crypto.randomUUID(),
+      riskTier,
       description,
-    };
+      command,
+      confirmationMode,
+      confirmationTarget,
+    });
 
-    const run = await infraWorkflow.createRun();
-    const result = await run.start({ inputData: input });
-
-    if (result.status === "suspended") {
-      // Store pending approval for resume
-      const approvalId = generateApprovalId();
-      const suspendedStep = result.suspended?.[0];
-
-      pendingApprovals.set(approvalId, {
-        runId: run.runId,
-        approval: {
-          runId: run.runId,
-          userId: message.userId,
-          chatId: message.chatId,
-          command,
-          riskTier,
-          description,
-          message: `This action requires your approval:\n\n${description}\n\nCommand: \`${command}\``,
-          createdAt: new Date(),
-        },
-      });
-
-      logTrace("workflow.approval.suspended", {
-        correlationId: message.correlationId,
-        chatId: message.chatId,
-        approvalId,
-        runId: run.runId,
-        riskTier,
-        suspendedStep: suspendedStep ?? "approval-gate",
-      }, "warn");
-
-      const riskLabel = riskTier === "destructive" ? "🔴 DESTRUCTIVE" : "🟡 Significant";
-      return {
-        correlationId: message.correlationId,
-        status: "pending_approval",
-        text: `${riskLabel} action detected.\n\n${description}\n\nCommand: \`${command}\`\n\nReply with /approve ${approvalId} to proceed.`,
-        metadata: {
-          approvalId,
-          suspendedStep: suspendedStep ?? "approval-gate",
-        },
-      };
-    }
-
-    // Ran through (read_only or low_risk)
-    if (result.status === "success") {
-      const output = result.result as { success: boolean; output: string; error?: string };
-      if (output.success) {
-        const formatted = await formatResponse(this.responderAgent, output.output, description);
-        logTrace("workflow.approval.completed", {
-          correlationId: message.correlationId,
-          chatId: message.chatId,
-          runId: run.runId,
-          status: "success",
-          outputPreview: previewText(output.output),
-        });
-        return {
-          correlationId: message.correlationId,
-          status: "success",
-          text: truncateForTelegram(formatted),
-        };
-      }
-
-      logTrace("workflow.approval.completed", {
-        correlationId: message.correlationId,
-        chatId: message.chatId,
-        runId: run.runId,
-        status: "error",
-        error: output.error ?? "Action failed.",
-      }, "warn");
-
-      return {
-        correlationId: message.correlationId,
-        status: "error",
-        text: output.error ?? "Action failed.",
-      };
-    }
-
-    logTrace("workflow.approval.unexpected_status", {
+    logTrace("workflow.approval.suspended", {
       correlationId: message.correlationId,
       chatId: message.chatId,
-      runId: run.runId,
-      workflowStatus: result.status,
+      approvalId: pendingAction.id,
+      runId: pendingAction.runId,
+      riskTier,
+      suspendedStep: "approval-gate",
     }, "warn");
+
+    const riskLabel = riskTier === "destructive" ? "🔴 DESTRUCTIVE" : "🟡 Significant";
+    const confirmInstruction = requiredRole === "commander"
+      ? `/confirm ${pendingAction.confirmationTarget}`
+      : `/approve ${pendingAction.id}`;
 
     return {
       correlationId: message.correlationId,
-      status: "error",
-      text: "Workflow completed with unexpected status.",
+      status: "pending_approval",
+      text: `${riskLabel} action detected.\n\n${description}\n\nCommand: \`${command}\`\n\nTo proceed, type exactly:\n${confirmInstruction}`,
+      metadata: {
+        approvalId: pendingAction.id,
+        confirmationMode,
+        confirmationTarget: pendingAction.confirmationTarget,
+        suspendedStep: "approval-gate",
+      },
     };
   }
 
@@ -758,5 +893,57 @@ export class HelmsmanOrchestrator {
     const history = this.conversationHistory.get(chatId) ?? [];
     const next = [...history, { role, text: trimmed }].slice(-MAX_HISTORY_TURNS);
     this.conversationHistory.set(chatId, next);
+  }
+
+  private rememberActivationContinuation(input: {
+    role: CapabilityRole;
+    activationId: string;
+    userId: string;
+    chatId: string;
+    command: string;
+    riskTier: string;
+    description: string;
+    correlationId: string;
+  }): void {
+    this.pendingActivationContinuations.set(`${input.role}:${input.activationId.toUpperCase()}`, {
+      role: input.role,
+      activationId: input.activationId.toUpperCase(),
+      userId: input.userId,
+      chatId: input.chatId,
+      command: input.command,
+      riskTier: input.riskTier,
+      description: input.description,
+      correlationId: input.correlationId,
+      createdAtMs: Date.now(),
+    });
+  }
+
+  private consumeActivationContinuation(
+    role: CapabilityRole,
+    activationId: string,
+    userId: string,
+    chatId: string,
+  ): PendingActivationContinuation | null {
+    this.cleanupEphemeralState();
+    const key = `${role}:${activationId.toUpperCase()}`;
+    const entry = this.pendingActivationContinuations.get(key);
+    if (!entry) {
+      return null;
+    }
+
+    if (entry.userId !== userId || entry.chatId !== chatId || entry.role !== role) {
+      return null;
+    }
+
+    this.pendingActivationContinuations.delete(key);
+    return entry;
+  }
+
+  private cleanupEphemeralState(nowMs: number = Date.now()): void {
+    for (const [key, entry] of this.pendingActivationContinuations.entries()) {
+      if (nowMs - entry.createdAtMs > PENDING_CONTEXT_TTL_MS) {
+        this.pendingActivationContinuations.delete(key);
+      }
+    }
   }
 }

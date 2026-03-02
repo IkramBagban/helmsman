@@ -29,6 +29,16 @@ function mockOrchestrator(
       status: "error" as const,
       text: "No pending approval",
     }),
+    handleActivation: async () => ({
+      correlationId: "mock",
+      status: "success" as const,
+      text: "Operator activated",
+    }),
+    handleConfirmation: async () => ({
+      correlationId: "mock",
+      status: "success" as const,
+      text: "Commander confirmed",
+    }),
   } as unknown as HelmsmanOrchestrator;
 }
 
@@ -297,5 +307,105 @@ describe("POST /webhook/telegram", () => {
     // The new orchestrator produces clean user-facing messages, not internal tool references
     expect(sentMessages[0]?.text).not.toContain("Tool shell.execute");
     expect(sentMessages[0]?.text).toContain("Significant action");
+  });
+
+  it("should intercept /activate command before LLM routing", async () => {
+    const sentMessages: { chatId: string; text: string }[] = [];
+
+    const sender: TelegramMessageSender = {
+      async sendTyping(): Promise<void> {
+        return;
+      },
+      async sendResponse(chatId: string, text: string): Promise<void> {
+        sentMessages.push({ chatId, text });
+      },
+    };
+
+    const orchestrator = {
+      handleMessage: async () => ({ correlationId: "x", status: "error" as const, text: "should-not-run" }),
+      handleApproval: async () => ({ correlationId: "x", status: "error" as const, text: "no" }),
+      handleActivation: async () => ({ correlationId: "x", status: "success" as const, text: "Activated" }),
+      handleConfirmation: async () => ({ correlationId: "x", status: "error" as const, text: "no" }),
+    } as unknown as HelmsmanOrchestrator;
+
+    const app = await createApp(baseEnv, {
+      telegram: {
+        dedupStore: new InMemoryDedupStore(),
+        sender,
+        orchestrator,
+      },
+    });
+    const baseUrl = await startAppServer(app);
+
+    const response = await fetch(`${baseUrl}/webhook/telegram`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": baseEnv.telegramWebhookSecret,
+      },
+      body: JSON.stringify({
+        update_id: 1006,
+        message: {
+          message_id: 15,
+          from: { id: 103, first_name: "Test User" },
+          chat: { id: 46, type: "private" },
+          date: 1_700_000_000,
+          text: "/activate operator ABC123",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(sentMessages[0]?.text).toContain("Activated");
+  });
+
+  it("should intercept /confirm command before LLM routing", async () => {
+    const sentMessages: { chatId: string; text: string }[] = [];
+
+    const sender: TelegramMessageSender = {
+      async sendTyping(): Promise<void> {
+        return;
+      },
+      async sendResponse(chatId: string, text: string): Promise<void> {
+        sentMessages.push({ chatId, text });
+      },
+    };
+
+    const orchestrator = {
+      handleMessage: async () => ({ correlationId: "x", status: "error" as const, text: "should-not-run" }),
+      handleApproval: async () => ({ correlationId: "x", status: "error" as const, text: "no" }),
+      handleActivation: async () => ({ correlationId: "x", status: "error" as const, text: "no" }),
+      handleConfirmation: async () => ({ correlationId: "x", status: "success" as const, text: "Confirmed" }),
+    } as unknown as HelmsmanOrchestrator;
+
+    const app = await createApp(baseEnv, {
+      telegram: {
+        dedupStore: new InMemoryDedupStore(),
+        sender,
+        orchestrator,
+      },
+    });
+    const baseUrl = await startAppServer(app);
+
+    const response = await fetch(`${baseUrl}/webhook/telegram`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": baseEnv.telegramWebhookSecret,
+      },
+      body: JSON.stringify({
+        update_id: 1007,
+        message: {
+          message_id: 16,
+          from: { id: 104, first_name: "Test User" },
+          chat: { id: 47, type: "private" },
+          date: 1_700_000_000,
+          text: "/confirm i-0524aa25c11382aa1",
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(sentMessages[0]?.text).toContain("Confirmed");
   });
 });

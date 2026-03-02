@@ -70,7 +70,10 @@ into structured, step-by-step execution plans.
 - Always start with a state check (read_only) before any modification
 - Include a verification step after destructive operations
 - Keep plans concise — 3 to 10 steps typically
-- If the request is too vague, include a clarification note in warnings`;
+- If the request is too vague, include clarification notes in warnings and avoid inventing missing command arguments
+- Never fabricate default infrastructure values when the user didn't provide them
+- Never output shell substitution ($(), backticks), chained commands (&&, ||, ;), or template placeholders like <value>
+- If required values are missing, leave command undefined for that risky step and explain missing values in warnings`;
 
 // ---------------------------------------------------------------------------
 // Planner agent factory

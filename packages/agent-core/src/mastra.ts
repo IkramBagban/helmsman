@@ -16,6 +16,7 @@ import { shellExecuteTool } from "./tools/shell-execute.js";
 import { createMastraGitHubTools } from "./tools/github-tools.js";
 import { createMastraDevopsTools } from "./tools/devops-tools.js";
 import { HelmsmanOrchestrator } from "./orchestrator.js";
+import type { CapabilityStore } from "./capability-store.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -30,6 +31,8 @@ export interface HelmsmanFactoryConfig {
   readonly githubBaseUrl?: string;
   /** Whether to include DevOps runtime tools (requires Docker) */
   readonly enableDevopsTools?: boolean;
+  /** Optional capability store for activation/approval state */
+  readonly capabilityStore?: CapabilityStore;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,5 +91,6 @@ export async function createHelmsman(
     devopsAgent,
     plannerAgent,
     responderAgent,
+    capabilityStore: config?.capabilityStore,
   });
 }

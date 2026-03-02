@@ -5,11 +5,16 @@
 export { createHelmsman, type HelmsmanFactoryConfig } from "./mastra.js";
 export {
   HelmsmanOrchestrator,
-  getPendingApproval,
-  consumePendingApproval,
   type HelmsmanConfig,
-  type PendingApproval,
 } from "./orchestrator.js";
+export {
+  InMemoryCapabilityStore,
+  type CapabilityStore,
+  type CapabilityRole,
+  type PendingActionRecord,
+  type RoleState,
+  type PendingActivation,
+} from "./capability-store.js";
 
 // Agents
 export {

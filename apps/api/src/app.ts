@@ -12,6 +12,7 @@ import {
   type TelegramWebhookDependencies,
   type TelegramWebhookHandler,
 } from "./routes/telegram.js";
+import { RedisCapabilityStore } from "./telegram/capability-store.js";
 import { InMemoryDedupStore, RedisDedupStore } from "./telegram/dedup.js";
 
 export interface ApiAppDependencies {
@@ -50,6 +51,7 @@ export const createApp = async (env: ApiEnv, dependencies?: ApiAppDependencies):
       telegramDeps = {
         ...telegramDeps,
         dedupStore: new RedisDedupStore(redis),
+        capabilityStore: new RedisCapabilityStore(redis),
       };
     } else {
       telegramDeps = {

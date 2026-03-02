@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it, beforeEach, mock } from "bun:test";
-import { HelmsmanOrchestrator, getPendingApproval } from "../src/orchestrator.js";
+import { HelmsmanOrchestrator } from "../src/orchestrator.js";
 import type { NormalizedMessage } from "@helmsman/shared";
 
 // ---------------------------------------------------------------------------
@@ -34,9 +34,8 @@ const baseMessage: NormalizedMessage = {
   chatId: "chat-42",
   text: "hello",
   platform: "telegram",
-  timestamp: new Date().toISOString(),
+  timestamp: new Date(),
   messageId: "msg-1",
-  userName: "Test User",
 };
 
 // ---------------------------------------------------------------------------
@@ -157,8 +156,8 @@ describe("HelmsmanOrchestrator", () => {
         object: {
           summary: "Deploy new staging environment",
           steps: [
-            { order: 1, description: "Create VPC", tool: "shell_execute", risk: "significant" },
-            { order: 2, description: "Create subnets", tool: "shell_execute", risk: "significant" },
+            { order: 1, description: "Create VPC", tool: "shell_execute", command: "aws ec2 create-vpc --cidr-block 10.0.0.0/16 --region us-east-1", risk: "significant" },
+            { order: 2, description: "Create subnets", tool: "shell_execute", command: "aws ec2 create-subnet --vpc-id vpc-123 --cidr-block 10.0.1.0/24", risk: "significant" },
           ],
           overallRisk: "significant",
           estimatedDuration: "5-10 minutes",
@@ -177,10 +176,243 @@ describe("HelmsmanOrchestrator", () => {
         text: "set up a new staging environment",
       });
 
-      // Significant plan should require approval
+      // Significant plan should require role activation first
       expect(response.status).toBe("pending_approval");
-      expect(response.text).toContain("/approve");
-      expect(response.text).toContain("Deploy new staging environment");
+      expect(response.text).toContain("/activate operator");
+    });
+
+    it("should not execute risky single_action before activation/approval", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "single_action",
+          confidence: 0.95,
+          reasoning: "User requested a destructive action",
+        },
+      }));
+
+      plannerAgent = createMockAgent(() => ({
+        object: {
+          summary: "Delete test bucket",
+          steps: [
+            {
+              order: 1,
+              description: "Delete S3 bucket",
+              tool: "shell_execute",
+              command: "aws s3 rb s3://test-bucket --force",
+              risk: "destructive",
+            },
+          ],
+          overallRisk: "destructive",
+        },
+      }));
+
+      devopsAgent = createMockAgent(() => ({
+        text: "should not execute",
+        toolResults: [],
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "delete my test bucket",
+      });
+
+      expect(response.status).toBe("pending_approval");
+      expect(response.text).toContain("/activate operator");
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
+    });
+
+    it("should ask for clarification when risky plan lacks executable command", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "single_action",
+          confidence: 0.95,
+          reasoning: "Single infra action request",
+        },
+      }));
+
+      plannerAgent = createMockAgent(() => ({
+        object: {
+          summary: "Create infrastructure resource",
+          steps: [
+            {
+              order: 1,
+              description: "Create resource after collecting required parameters",
+              tool: "shell_execute",
+              risk: "significant",
+            },
+          ],
+          overallRisk: "significant",
+          warnings: [
+            "Please provide region",
+            "Please provide instance type",
+          ],
+        },
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "create an instance",
+      });
+
+      expect(response.status).toBe("success");
+      expect(response.text).toContain("I can continue with this request");
+      expect(response.text).toContain("Please provide region");
+      expect(response.text).toContain("Please provide instance type");
+      expect(plannerAgent.generate).toHaveBeenCalledTimes(1);
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
+    });
+
+    it("should ask for missing values when risky command has template placeholders", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "single_action",
+          confidence: 0.95,
+          reasoning: "Single infra action request",
+        },
+      }));
+
+      plannerAgent = createMockAgent(() => ({
+        object: {
+          summary: "Create EC2 instance",
+          steps: [
+            {
+              order: 1,
+              description: "Launch instance",
+              tool: "shell_execute",
+              command: "aws ec2 run-instances --image-id <ami_id> --instance-type <instance_type> --region <aws_region>",
+              risk: "significant",
+            },
+          ],
+          overallRisk: "significant",
+          warnings: [
+            "Which AMI ID should I use?",
+            "What instance type do you need?",
+            "Which AWS region?",
+          ],
+        },
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "create ec2",
+      });
+
+      // Should route to clarification with plan warnings, not dead-end validation
+      expect(response.status).toBe("success");
+      expect(response.text).toContain("need");
+      expect(response.text).toContain("AMI ID");
+      expect(response.text).toContain("instance type");
+      expect(response.text).not.toContain("/approve");
+      expect(response.text).not.toContain("/activate");
+    });
+
+    it("should derive missing value names from placeholders when plan has no warnings", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "single_action",
+          confidence: 0.95,
+          reasoning: "Single infra action request",
+        },
+      }));
+
+      plannerAgent = createMockAgent(() => ({
+        object: {
+          summary: "Create EC2 instance",
+          steps: [
+            {
+              order: 1,
+              description: "Launch instance",
+              tool: "shell_execute",
+              command: "aws ec2 run-instances --image-id <ami_id> --instance-type <instance_type>",
+              risk: "significant",
+            },
+          ],
+          overallRisk: "significant",
+        },
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "create ec2",
+      });
+
+      // No plan.warnings, so should derive from placeholder names
+      expect(response.status).toBe("success");
+      expect(response.text).toContain("ami id");
+      expect(response.text).toContain("instance type");
+      expect(response.text).not.toContain("/approve");
+    });
+
+    it("should clarify when risky command has shell substitution", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "multi_step",
+          confidence: 0.95,
+          reasoning: "Multi-step infra action",
+        },
+      }));
+
+      plannerAgent = createMockAgent(() => ({
+        object: {
+          summary: "Create SG from discovered VPC",
+          steps: [
+            {
+              order: 1,
+              description: "Create SG",
+              tool: "shell_execute",
+              command: "aws ec2 create-security-group --group-name test --vpc-id $(aws ec2 describe-vpcs --query 'Vpcs[0].VpcId' --output text)",
+              risk: "significant",
+            },
+          ],
+          overallRisk: "significant",
+          warnings: ["Need the actual VPC ID — shell substitution is not allowed"],
+        },
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "create security group in default vpc",
+      });
+
+      // Should route to clarification instead of dead-end
+      expect(response.status).toBe("success");
+      expect(response.text).toContain("need");
+      expect(response.text).not.toContain("/approve");
     });
 
     it("should execute low-risk multi_step plans immediately", async () => {
@@ -282,9 +514,9 @@ describe("HelmsmanOrchestrator", () => {
     });
 
     it("should reject approvals from wrong user", async () => {
-      // First, create a pending approval via a multi_step flow
+      // First, create a pending approval via a significant single_action flow
       routerAgent = createMockAgent(() => ({
-        object: { intent: "multi_step", confidence: 0.9, reasoning: "Multi-step" },
+        object: { intent: "single_action", confidence: 0.9, reasoning: "Single action" },
       }));
 
       plannerAgent = createMockAgent(() => ({
@@ -302,13 +534,24 @@ describe("HelmsmanOrchestrator", () => {
         responderAgent,
       });
 
-      const planResponse = await orchestrator.handleMessage({
+      const activationResponse = await orchestrator.handleMessage({
         ...baseMessage,
         text: "scale the ASG to 5",
       });
 
-      expect(planResponse.status).toBe("pending_approval");
-      const approvalId = planResponse.text.match(/\/approve\s+(\S+)/)?.[1];
+      expect(activationResponse.status).toBe("pending_approval");
+      const activationId = activationResponse.text.match(/\/activate\s+operator\s+([A-Z0-9]{6})/)?.[1];
+      expect(activationId).toBeDefined();
+
+      // Activation auto-continues the pending command, which creates an approval step
+      const activated = await orchestrator.handleActivation(
+        "operator",
+        activationId!,
+        "user-42",
+        "chat-42",
+      );
+      expect(activated.status).toBe("pending_approval");
+      const approvalId = activated.text.match(/\/approve\s+(\S+)/)?.[1];
       expect(approvalId).toBeDefined();
 
       // Wrong user attempt
@@ -319,7 +562,7 @@ describe("HelmsmanOrchestrator", () => {
       );
 
       expect(wrongUserResponse.status).toBe("error");
-      expect(wrongUserResponse.text).toContain("doesn't belong");
+      expect(wrongUserResponse.text).toContain("not found");
     });
   });
 

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import {
   createHelmsman,
+  type CapabilityStore,
+  InMemoryCapabilityStore,
   type HelmsmanOrchestrator,
 } from "@helmsman/agent-core";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
@@ -23,6 +25,7 @@ export interface TelegramWebhookHandler {
 export interface TelegramWebhookDependencies {
   readonly dedupStore?: DedupStore;
   readonly sender?: TelegramMessageSender;
+  readonly capabilityStore?: CapabilityStore;
   /**
    * Pre-built orchestrator for testing. If not provided, one is created
    * automatically using createHelmsman().
@@ -62,6 +65,7 @@ export const createTelegramWebhookHandler = async (
   }
   const dedupStore = dependencies.dedupStore;
   const sender = dependencies?.sender ?? new TelegramSender(env.telegramBotToken);
+  const capabilityStore = dependencies?.capabilityStore ?? new InMemoryCapabilityStore();
 
   // ── Bootstrap the Mastra orchestrator ───────────────────────────────────
   const orchestrator: HelmsmanOrchestrator =
@@ -71,6 +75,7 @@ export const createTelegramWebhookHandler = async (
       githubToken: process.env.GITHUB_TOKEN,
       githubBaseUrl: process.env.GITHUB_API_BASE_URL,
       enableDevopsTools: true,
+      capabilityStore,
     }));
 
   return {
@@ -116,6 +121,16 @@ export const createTelegramWebhookHandler = async (
           return Response.json({ ok: true });
         }
 
+        // ── Activation flow (/activate <role> <id>) ──────────────────────
+        const activateMatch = incomingText.match(/^\/activate\s+(operator|commander)\s+([A-Z0-9]{6})$/i);
+        if (activateMatch?.[1] && activateMatch?.[2]) {
+          const role = activateMatch[1].toLowerCase() as "operator" | "commander";
+          const activationId = activateMatch[2].toUpperCase();
+          const activationResponse = await orchestrator.handleActivation(role, activationId, userId, chatId);
+          await sender.sendResponse(chatId, truncateForTelegram(activationResponse.text));
+          return Response.json({ ok: true });
+        }
+
         // ── Approval flow (/approve <id>) ────────────────────────────────
         const approveMatch = incomingText.match(/^\/approve\s+([a-zA-Z0-9-]{6,40})$/i);
         if (approveMatch) {
@@ -132,6 +147,20 @@ export const createTelegramWebhookHandler = async (
           );
 
           await sender.sendResponse(chatId, truncateForTelegram(approvalResponse.text));
+          return Response.json({ ok: true });
+        }
+
+        // ── Commander confirmation (/confirm <resourceId>) ───────────────
+        const confirmMatch = incomingText.match(/^\/confirm\s+([^\s]+)$/i);
+        if (confirmMatch?.[1]) {
+          const confirmationTarget = confirmMatch[1];
+          const confirmationResponse = await orchestrator.handleConfirmation(
+            confirmationTarget,
+            userId,
+            chatId,
+          );
+
+          await sender.sendResponse(chatId, truncateForTelegram(confirmationResponse.text));
           return Response.json({ ok: true });
         }
 
