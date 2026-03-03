@@ -1,0 +1,358 @@
+import { randomUUID } from "node:crypto";
+
+import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
+import type { NormalizedMessage } from "@helmsman/shared";
+
+import type { TelegramMessageSender } from "../routes/telegram.js";
+import { JsonScheduleRepository } from "./store.js";
+import type { ScheduleRecord, ScheduleRunRecord } from "./types.js";
+
+const MAX_DELAY_MS = 2_147_000_000;
+const FAILURE_NOTIFY_THRESHOLD = 3;
+const FAILURE_AUTO_PAUSE_THRESHOLD = 5;
+
+const toIso = (date: Date): string => date.toISOString();
+
+const parseMinutes = (time: string): number | null => {
+  const match = time.match(/^(\d{2}):(\d{2})$/);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return hour * 60 + minute;
+};
+
+const zonedTimeKey = (date: Date, timezone: string): string => {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return formatter.format(date).replace(":", ":");
+};
+
+const findNextDailyRun = (timezone: string, timesOfDay: readonly string[], from: Date): Date | null => {
+  if (timesOfDay.length === 0) {
+    return null;
+  }
+
+  const validTimes = timesOfDay
+    .map(parseMinutes)
+    .filter((value): value is number => typeof value === "number");
+
+  if (validTimes.length === 0) {
+    return null;
+  }
+
+  const targetKeys = new Set(
+    validTimes.map((value) => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`),
+  );
+
+  const startMs = from.getTime();
+  for (let minuteOffset = 1; minuteOffset <= 60 * 48; minuteOffset += 1) {
+    const candidate = new Date(startMs + minuteOffset * 60_000);
+    const key = zonedTimeKey(candidate, timezone);
+    if (targetKeys.has(key)) {
+      return new Date(Math.floor(candidate.getTime() / 60_000) * 60_000);
+    }
+  }
+
+  return null;
+};
+
+const computeNextRun = (schedule: ScheduleRecord, from: Date = new Date()): Date | null => {
+  if (schedule.status !== "active" && schedule.status !== "degraded") {
+    return null;
+  }
+
+  if (schedule.pattern.type === "once") {
+    const runAtIso = schedule.pattern.runAtIso;
+    if (!runAtIso) {
+      return null;
+    }
+    const runAt = new Date(runAtIso);
+    if (Number.isNaN(runAt.getTime()) || runAt.getTime() <= from.getTime()) {
+      return null;
+    }
+    return runAt;
+  }
+
+  if (schedule.pattern.type === "interval") {
+    const intervalMinutes = schedule.pattern.intervalMinutes ?? 0;
+    if (intervalMinutes <= 0) {
+      return null;
+    }
+
+    const baseline = schedule.lastRunAtIso ? new Date(schedule.lastRunAtIso) : new Date(schedule.createdAtIso);
+    if (Number.isNaN(baseline.getTime())) {
+      return new Date(from.getTime() + intervalMinutes * 60_000);
+    }
+
+    let candidate = new Date(baseline.getTime() + intervalMinutes * 60_000);
+    while (candidate.getTime() <= from.getTime()) {
+      candidate = new Date(candidate.getTime() + intervalMinutes * 60_000);
+    }
+    return candidate;
+  }
+
+  if (schedule.pattern.type === "daily_times") {
+    return findNextDailyRun(schedule.pattern.timezone, schedule.pattern.timesOfDay ?? [], from);
+  }
+
+  return null;
+};
+
+export interface SchedulerEngineConfig {
+  readonly repository: JsonScheduleRepository;
+  readonly sender: TelegramMessageSender;
+  readonly orchestrator: HelmsmanOrchestrator;
+}
+
+export class SchedulerEngine {
+  private readonly repository: JsonScheduleRepository;
+  private readonly sender: TelegramMessageSender;
+  private readonly orchestrator: HelmsmanOrchestrator;
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+
+  public constructor(config: SchedulerEngineConfig) {
+    this.repository = config.repository;
+    this.sender = config.sender;
+    this.orchestrator = config.orchestrator;
+  }
+
+  public async start(): Promise<void> {
+    const schedules = await this.repository.listActiveSchedules();
+    for (const schedule of schedules) {
+      await this.arm(schedule.id);
+    }
+  }
+
+  public async arm(scheduleId: string): Promise<void> {
+    this.clearTimer(scheduleId);
+    const schedule = await this.repository.getScheduleById(scheduleId);
+    if (!schedule) {
+      return;
+    }
+
+    const nextRun = computeNextRun(schedule);
+    if (!nextRun) {
+      if (schedule.pattern.type === "once" && schedule.status !== "completed") {
+        await this.repository.updateSchedule({
+          ...schedule,
+          status: "completed",
+          nextRunAtIso: undefined,
+          updatedAtIso: toIso(new Date()),
+        });
+      }
+      return;
+    }
+
+    await this.repository.updateSchedule({
+      ...schedule,
+      nextRunAtIso: toIso(nextRun),
+      updatedAtIso: toIso(new Date()),
+    });
+
+    const delay = nextRun.getTime() - Date.now();
+    if (delay <= 0) {
+      await this.run(scheduleId, nextRun);
+      return;
+    }
+
+    if (delay > MAX_DELAY_MS) {
+      const timer = setTimeout(() => {
+        void this.arm(scheduleId);
+      }, MAX_DELAY_MS);
+      this.timers.set(scheduleId, timer);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void this.run(scheduleId, nextRun);
+    }, delay);
+    this.timers.set(scheduleId, timer);
+  }
+
+  public async pause(scheduleId: string): Promise<void> {
+    this.clearTimer(scheduleId);
+    const schedule = await this.repository.getScheduleById(scheduleId);
+    if (!schedule) {
+      return;
+    }
+    await this.repository.updateSchedule({
+      ...schedule,
+      status: "paused",
+      nextRunAtIso: undefined,
+      updatedAtIso: toIso(new Date()),
+    });
+  }
+
+  public async resume(scheduleId: string): Promise<void> {
+    const schedule = await this.repository.getScheduleById(scheduleId);
+    if (!schedule || schedule.status === "cancelled") {
+      return;
+    }
+
+    await this.repository.updateSchedule({
+      ...schedule,
+      status: "active",
+      updatedAtIso: toIso(new Date()),
+    });
+    await this.arm(scheduleId);
+  }
+
+  public async cancel(scheduleId: string): Promise<void> {
+    this.clearTimer(scheduleId);
+    const schedule = await this.repository.getScheduleById(scheduleId);
+    if (!schedule) {
+      return;
+    }
+    await this.repository.updateSchedule({
+      ...schedule,
+      status: "cancelled",
+      nextRunAtIso: undefined,
+      updatedAtIso: toIso(new Date()),
+    });
+  }
+
+  private clearTimer(scheduleId: string): void {
+    const timer = this.timers.get(scheduleId);
+    if (!timer) {
+      return;
+    }
+    clearTimeout(timer);
+    this.timers.delete(scheduleId);
+  }
+
+  private async run(scheduleId: string, plannedAt: Date): Promise<void> {
+    this.clearTimer(scheduleId);
+    const schedule = await this.repository.getScheduleById(scheduleId);
+    if (!schedule || (schedule.status !== "active" && schedule.status !== "degraded")) {
+      return;
+    }
+
+    const idempotencyKey = `${schedule.id}:${plannedAt.toISOString()}`;
+    if (await this.repository.hasRunKey(idempotencyKey)) {
+      const now = new Date();
+      await this.repository.appendRun({
+        id: randomUUID(),
+        scheduleId: schedule.id,
+        idempotencyKey,
+        platform: schedule.platform,
+        chatId: schedule.chatId,
+        sourceMessageId: schedule.sourceMessageId,
+        plannedAtIso: plannedAt.toISOString(),
+        startedAtIso: now.toISOString(),
+        finishedAtIso: now.toISOString(),
+        status: "skipped_idempotent",
+        resultSummary: "Skipped duplicate trigger",
+      });
+      await this.arm(schedule.id);
+      return;
+    }
+
+    const startedAt = new Date();
+    let runStatus: ScheduleRunRecord["status"] = "success";
+    let resultSummary = "Completed";
+    let errorSummary: string | undefined;
+
+    try {
+      if (schedule.action.type === "http_ping" && schedule.action.url) {
+        const response = await fetch(schedule.action.url, { method: "GET" });
+        resultSummary = `HTTP ${response.status} from ${schedule.action.url}`;
+        await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled HTTP check: ${resultSummary}`);
+      } else if (schedule.action.type === "reminder") {
+        const reminder = schedule.action.reminderText ?? schedule.action.title;
+        resultSummary = `Reminder delivered: ${reminder}`;
+        await this.sender.sendResponse(schedule.chatId, `⏱️ Reminder: ${reminder}`);
+      } else {
+        const taskText = schedule.action.taskText ?? schedule.sourceText;
+        const response = await this.orchestrator.handleMessage({
+          platform: schedule.platform === "website" ? "telegram" : schedule.platform,
+          chatId: schedule.chatId,
+          messageId: `schedule-${schedule.id}-${Date.now()}`,
+          userId: schedule.ownerUserId,
+          text: taskText,
+          timestamp: new Date(),
+          correlationId: randomUUID(),
+          metadata: {
+            scheduled: true,
+            scheduleId: schedule.id,
+            sourceMessageId: schedule.sourceMessageId,
+          },
+        } satisfies NormalizedMessage);
+
+        runStatus = response.status === "error" ? "failed" : "success";
+        resultSummary = response.text;
+        if (response.status === "error") {
+          errorSummary = response.text;
+          await this.sender.sendResponse(
+            schedule.chatId,
+            `⚠️ Scheduled task failed (${schedule.action.title}): ${response.text}`,
+          );
+        } else {
+          await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled task result:\n${response.text}`);
+        }
+      }
+    } catch (error) {
+      runStatus = "failed";
+      errorSummary = error instanceof Error ? error.message : String(error);
+      resultSummary = errorSummary;
+      await this.sender.sendResponse(
+        schedule.chatId,
+        `⚠️ Scheduled task failed (${schedule.action.title}): ${errorSummary}`,
+      );
+    }
+
+    const finishedAt = new Date();
+    await this.repository.appendRun({
+      id: randomUUID(),
+      scheduleId: schedule.id,
+      idempotencyKey,
+      platform: schedule.platform,
+      chatId: schedule.chatId,
+      sourceMessageId: schedule.sourceMessageId,
+      plannedAtIso: plannedAt.toISOString(),
+      startedAtIso: startedAt.toISOString(),
+      finishedAtIso: finishedAt.toISOString(),
+      status: runStatus,
+      resultSummary,
+      errorSummary,
+    });
+
+    const consecutiveFailures = runStatus === "failed" ? schedule.consecutiveFailures + 1 : 0;
+    const shouldAutoPause = consecutiveFailures >= FAILURE_AUTO_PAUSE_THRESHOLD;
+    const shouldWarn = consecutiveFailures >= FAILURE_NOTIFY_THRESHOLD;
+
+    if (shouldWarn && runStatus === "failed") {
+      await this.sender.sendResponse(
+        schedule.chatId,
+        `⚠️ Schedule ${schedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
+      );
+    }
+
+    const nextStatus = shouldAutoPause
+      ? "paused"
+      : runStatus === "failed"
+        ? "degraded"
+        : schedule.pattern.type === "once"
+          ? "completed"
+          : "active";
+
+    await this.repository.updateSchedule({
+      ...schedule,
+      status: nextStatus,
+      lastRunAtIso: finishedAt.toISOString(),
+      updatedAtIso: finishedAt.toISOString(),
+      nextRunAtIso: undefined,
+      consecutiveFailures,
+    });
+
+    await this.arm(schedule.id);
+  }
+}

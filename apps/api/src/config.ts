@@ -14,6 +14,7 @@ export interface ApiEnv {
   readonly awsKnowledgeMcpUrl?: string;
   readonly awsKnowledgeMcpApiKey?: string;
   readonly awsKnowledgeMcpTimeoutMs?: number;
+  readonly scheduleDataDir: string;
 }
 
 const getRequired = (name: string): string => {
@@ -65,6 +66,7 @@ export const getEnv = (): ApiEnv => {
     awsKnowledgeMcpTimeoutMs: process.env.AWS_KNOWLEDGE_MCP_TIMEOUT_MS
       ? Number(process.env.AWS_KNOWLEDGE_MCP_TIMEOUT_MS)
       : undefined,
+    scheduleDataDir: process.env.SCHEDULE_DATA_DIR ?? "data",
   };
 
   if (env.awsKnowledgeMcpTimeoutMs !== undefined && (Number.isNaN(env.awsKnowledgeMcpTimeoutMs) || env.awsKnowledgeMcpTimeoutMs < 1000)) {
