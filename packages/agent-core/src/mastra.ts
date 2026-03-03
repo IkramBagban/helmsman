@@ -40,6 +40,12 @@ export interface HelmsmanFactoryConfig {
   readonly awsKnowledgeMcpTimeoutMs?: number;
   /** Optional capability store for activation/approval state */
   readonly capabilityStore?: CapabilityStore;
+  /**
+   * Additional tools to register with the agent (e.g. scheduling tools).
+   * These are merged into the tool set alongside built-in tools.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Mastra tool types are covariant
+  readonly extraTools?: Record<string, any>;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +98,11 @@ export async function createHelmsman(
     } catch (error) {
       console.warn("[Helmsman] Failed to load DevOps runtime tools:", error);
     }
+  }
+
+  // Merge any extra tools provided by the caller (e.g. scheduling tools)
+  if (config?.extraTools) {
+    Object.assign(tools, config.extraTools);
   }
 
   // ── Create agents ─────────────────────────────────────────────────────────

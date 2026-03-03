@@ -68,6 +68,15 @@ export class HelmsmanOrchestrator {
   }
 
   /**
+   * Compose concise user-facing text using the responder agent.
+   * Useful for non-tooling communication flows that still need Helmsman tone.
+   */
+  public async composeAssistantReply(input: string): Promise<string> {
+    const result = await this.responderAgent.generate(input);
+    return result.text;
+  }
+
+  /**
    * Handle an incoming user message. Returns an AgentResponse.
    *
    * This is the main entry point — equivalent to HelmsmanAgentService.handleMessage
