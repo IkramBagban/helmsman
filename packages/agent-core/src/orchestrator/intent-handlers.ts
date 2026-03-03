@@ -35,7 +35,12 @@ export async function handleChatIntent(
     chatId: message.chatId,
   });
 
-  const prompt = buildPrompt(message.text, conversationContext);
+  const prompt = buildPrompt(message.text, conversationContext, {
+    chatId: message.chatId,
+    userId: message.userId,
+    messageId: message.messageId,
+    platform: message.platform,
+  });
   const result = await context.devopsAgent.generate(prompt);
 
   logTrace("handler.chat.completed", {
@@ -70,7 +75,12 @@ export async function handleQueryIntent(
     "- Do not rely on memory for AWS defaults/limits when tool grounding is possible.",
   ].join("\n");
 
-  const prompt = buildPrompt(queryPrompt, conversationContext);
+  const prompt = buildPrompt(queryPrompt, conversationContext, {
+    chatId: message.chatId,
+    userId: message.userId,
+    messageId: message.messageId,
+    platform: message.platform,
+  });
   const result = await context.devopsAgent.generate(prompt, {
     maxSteps: MAX_STEPS,
   });
@@ -99,7 +109,8 @@ export async function handleSingleActionIntent(
     chatId: message.chatId,
   });
 
-  const plannerPrompt = buildPrompt(message.text, conversationContext);
+  const msgMeta = { chatId: message.chatId, userId: message.userId, messageId: message.messageId, platform: message.platform };
+  const plannerPrompt = buildPrompt(message.text, conversationContext, msgMeta);
   const plan = await generatePlan(context.plannerAgent, plannerPrompt);
 
   const isRiskyPlan = plan.overallRisk === "significant" || plan.overallRisk === "destructive";
@@ -150,7 +161,7 @@ export async function handleSingleActionIntent(
     );
   }
 
-  const prompt = buildPrompt(message.text, conversationContext);
+  const prompt = buildPrompt(message.text, conversationContext, msgMeta);
   const result = await context.devopsAgent.generate(prompt, {
     maxSteps: MAX_STEPS,
   });
@@ -179,7 +190,8 @@ export async function handleMultiStepIntent(
     chatId: message.chatId,
   });
 
-  const plannerPrompt = buildPrompt(message.text, conversationContext);
+  const msgMeta = { chatId: message.chatId, userId: message.userId, messageId: message.messageId, platform: message.platform };
+  const plannerPrompt = buildPrompt(message.text, conversationContext, msgMeta);
   const plan = await generatePlan(context.plannerAgent, plannerPrompt);
 
   logTrace("handler.multi_step.plan_generated", {

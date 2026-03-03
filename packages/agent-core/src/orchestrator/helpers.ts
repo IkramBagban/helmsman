@@ -229,13 +229,32 @@ export function formatPlan(plan: Plan): string {
   return lines.join("\n");
 }
 
-export function buildPrompt(userMessage: string, conversationContext?: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const runtimeContext = [
-    `Runtime date (UTC): ${today}`,
+export interface PromptMetadata {
+  readonly chatId?: string;
+  readonly userId?: string;
+  readonly messageId?: string;
+  readonly platform?: string;
+}
+
+export function buildPrompt(
+  userMessage: string,
+  conversationContext?: string,
+  metadata?: PromptMetadata,
+): string {
+  const now = new Date();
+  const runtimeLines = [
+    `Runtime datetime (UTC): ${now.toISOString()}`,
     "Autonomy: resolve relative dates and contextual resource references yourself before asking the user.",
     "Source policy: use tools for facts; use aws_knowledge_lookup for AWS behavior/limits/defaults when uncertain.",
-  ].join("\n");
+  ];
+
+  if (metadata?.chatId) {
+    runtimeLines.push(
+      `Session metadata — platform: ${metadata.platform ?? "telegram"}, chatId: ${metadata.chatId}, userId: ${metadata.userId ?? "unknown"}, messageId: ${metadata.messageId ?? "unknown"}`,
+    );
+  }
+
+  const runtimeContext = runtimeLines.join("\n");
 
   if (!conversationContext) {
     return `${runtimeContext}\n\n${userMessage}`;

@@ -22,8 +22,12 @@ const SchedulePatternSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("once"),
     timezone: z.string().default("UTC").describe("IANA timezone, e.g. 'America/New_York'. Default UTC."),
-    runAtIso: z.string().describe("ISO-8601 datetime for when to run. Required for one-time schedules."),
-  }),
+    runAtIso: z.string().optional().describe("ISO-8601 datetime for when to run. Provide either runAtIso OR delayMinutes, not both."),
+    delayMinutes: z.number().positive().optional().describe("Run after this many minutes from now. Use for relative times like 'in 5 minutes', 'after 1 hour' (=60). The system computes the exact time."),
+  }).refine(
+    (data) => data.runAtIso ?? data.delayMinutes,
+    { message: "Either runAtIso or delayMinutes is required for once patterns." },
+  ),
   z.object({
     type: z.literal("interval"),
     timezone: z.string().default("UTC").describe("IANA timezone. Default UTC."),
@@ -86,17 +90,16 @@ Use this tool when the user wants to:
 - Run something daily at specific times ("send me my AWS bill daily at 9am and 6pm")
 
 Pattern types:
-- "once": run once at a specific ISO datetime (compute runAtIso from the user's relative time like "in 30 minutes")
+- "once": run once. Provide EITHER delayMinutes (for "in 5 minutes", "after 1 hour") OR runAtIso (for absolute times). Prefer delayMinutes for relative times.
 - "interval": repeat every N minutes
 - "daily_times": run at specific HH:MM times each day
 
 Action types:
-- "agent_task": a task Helmsman will execute (e.g., "check EC2 status")
-- "reminder": a message to send to the user
+- "agent_task": Helmsman executes a task (e.g. "check billing", "list EC2 instances"). Use for anything involving data fetching, commands, or infrastructure.
+- "reminder": send a text message to the user (e.g. "drink water", "standup time")
 - "http_ping": GET request to a URL
 
-You MUST convert relative times (e.g., "in 30 minutes", "after 2 hours") to absolute ISO-8601 datetimes for "once" patterns.
-Always include timezone when the user specifies one.`,
+You MUST pass chatId, userId, messageId, platform from the session metadata provided in the runtime context.`,
     inputSchema: z.object({
       action: ScheduleActionSchema,
       pattern: SchedulePatternSchema,
@@ -115,6 +118,17 @@ Always include timezone when the user specifies one.`,
     }),
     execute: async (input) => {
       try {
+        // Resolve delayMinutes → runAtIso for "once" patterns
+        let resolvedPattern = input.pattern;
+        if (resolvedPattern.type === "once" && !resolvedPattern.runAtIso && resolvedPattern.delayMinutes) {
+          const runAt = new Date(Date.now() + resolvedPattern.delayMinutes * 60_000);
+          resolvedPattern = {
+            type: "once" as const,
+            timezone: resolvedPattern.timezone,
+            runAtIso: runAt.toISOString(),
+          };
+        }
+
         const result = await schedulingService.createSchedule({
           source: {
             platform: input.platform,
@@ -124,7 +138,7 @@ Always include timezone when the user specifies one.`,
             originalText: input.originalText,
           },
           action: input.action,
-          pattern: input.pattern,
+          pattern: resolvedPattern,
         });
         return result;
       } catch (error) {
