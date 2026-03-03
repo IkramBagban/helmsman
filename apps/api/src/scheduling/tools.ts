@@ -22,17 +22,23 @@ const SchedulePatternSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("once"),
     timezone: z.string().default("UTC").describe("IANA timezone, e.g. 'America/New_York'. Default UTC."),
-    runAtIso: z.string().optional().describe("ISO-8601 datetime for when to run. Provide either runAtIso OR delayMinutes, not both."),
-    delayMinutes: z.number().positive().optional().describe("Run after this many minutes from now. Use for relative times like 'in 5 minutes', 'after 1 hour' (=60). The system computes the exact time."),
+    runAtIso: z.string().optional().describe("ISO-8601 datetime for when to run. Provide either runAtIso OR delayMinutes OR delaySeconds."),
+    delayMinutes: z.number().positive().optional().describe("Run after this many minutes from now. Use for relative times >= 1 minute like 'in 5 minutes', 'after 1 hour' (=60)."),
+    delaySeconds: z.number().int().positive().optional().describe("Run after this many seconds from now. Use for sub-minute delays like 'after 30 seconds', 'in 10 sec'. Minimum: 5."),
   }).refine(
-    (data) => data.runAtIso ?? data.delayMinutes,
-    { message: "Either runAtIso or delayMinutes is required for once patterns." },
+    (data) => data.runAtIso ?? data.delayMinutes ?? data.delaySeconds,
+    { message: "Provide one of: runAtIso, delayMinutes, or delaySeconds for once patterns." },
   ),
   z.object({
     type: z.literal("interval"),
     timezone: z.string().default("UTC").describe("IANA timezone. Default UTC."),
-    intervalMinutes: z.number().int().positive().describe("Repeat every N minutes."),
-  }),
+    intervalMinutes: z.number().int().positive().optional().describe("Repeat every N minutes. Use for intervals >= 1 minute."),
+    intervalSeconds: z.number().int().min(5).optional().describe("Repeat every N seconds. Use for sub-minute intervals like 'every 10 seconds'. Minimum: 5."),
+    maxRuns: z.number().int().positive().optional().describe("Stop after this many runs. Use when the user specifies a bounded duration like 'for 1 minute', 'for 5 times', 'till 10 minutes'."),
+  }).refine(
+    (data) => data.intervalMinutes ?? data.intervalSeconds,
+    { message: "Provide either intervalMinutes or intervalSeconds for interval patterns." },
+  ),
   z.object({
     type: z.literal("daily_times"),
     timezone: z.string().default("UTC").describe("IANA timezone. Default UTC."),
@@ -90,8 +96,8 @@ Use this tool when the user wants to:
 - Run something daily at specific times ("send me my AWS bill daily at 9am and 6pm")
 
 Pattern types:
-- "once": run once. Provide EITHER delayMinutes (for "in 5 minutes", "after 1 hour") OR runAtIso (for absolute times). Prefer delayMinutes for relative times.
-- "interval": repeat every N minutes
+- "once": run once. Provide EITHER delayMinutes (>= 1 min), delaySeconds (for sub-minute like "after 30 sec"), OR runAtIso (absolute times). Prefer delayMinutes/delaySeconds for relative times.
+- "interval": repeat on an interval. Use intervalMinutes (>= 1 min) or intervalSeconds (for sub-minute like "every 10 sec"). Add maxRuns when user specifies a bounded duration ("for 1 minute" at 10s interval = maxRuns 6).
 - "daily_times": run at specific HH:MM times each day
 
 Action types:
@@ -118,14 +124,32 @@ You MUST pass chatId, userId, messageId, platform from the session metadata prov
     }),
     execute: async (input) => {
       try {
-        // Resolve delayMinutes → runAtIso for "once" patterns
+        // Resolve delayMinutes/delaySeconds → runAtIso for "once" patterns
         let resolvedPattern = input.pattern;
-        if (resolvedPattern.type === "once" && !resolvedPattern.runAtIso && resolvedPattern.delayMinutes) {
-          const runAt = new Date(Date.now() + resolvedPattern.delayMinutes * 60_000);
+        if (resolvedPattern.type === "once" && !resolvedPattern.runAtIso) {
+          let delayMs = 0;
+          if (resolvedPattern.delayMinutes) {
+            delayMs = resolvedPattern.delayMinutes * 60_000;
+          } else if (resolvedPattern.delaySeconds) {
+            delayMs = Math.max(resolvedPattern.delaySeconds, 5) * 1_000;
+          }
+          if (delayMs > 0) {
+            const runAt = new Date(Date.now() + delayMs);
+            resolvedPattern = {
+              type: "once" as const,
+              timezone: resolvedPattern.timezone,
+              runAtIso: runAt.toISOString(),
+            };
+          }
+        }
+
+        // Normalize intervalSeconds into the pattern for the engine
+        if (resolvedPattern.type === "interval" && !resolvedPattern.intervalMinutes && resolvedPattern.intervalSeconds) {
           resolvedPattern = {
-            type: "once" as const,
+            type: "interval" as const,
             timezone: resolvedPattern.timezone,
-            runAtIso: runAt.toISOString(),
+            intervalSeconds: Math.max(resolvedPattern.intervalSeconds, 5),
+            maxRuns: resolvedPattern.maxRuns,
           };
         }
 

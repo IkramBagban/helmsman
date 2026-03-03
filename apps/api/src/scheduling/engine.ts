@@ -83,19 +83,27 @@ const computeNextRun = (schedule: ScheduleRecord, from: Date = new Date()): Date
   }
 
   if (schedule.pattern.type === "interval") {
-    const intervalMinutes = schedule.pattern.intervalMinutes ?? 0;
-    if (intervalMinutes <= 0) {
+    // Support both intervalMinutes and intervalSeconds
+    const intervalMs = schedule.pattern.intervalSeconds
+      ? schedule.pattern.intervalSeconds * 1_000
+      : (schedule.pattern.intervalMinutes ?? 0) * 60_000;
+    if (intervalMs <= 0) {
+      return null;
+    }
+
+    // Check maxRuns bound
+    if (schedule.pattern.maxRuns && (schedule.runsCompleted ?? 0) >= schedule.pattern.maxRuns) {
       return null;
     }
 
     const baseline = schedule.lastRunAtIso ? new Date(schedule.lastRunAtIso) : new Date(schedule.createdAtIso);
     if (Number.isNaN(baseline.getTime())) {
-      return new Date(from.getTime() + intervalMinutes * 60_000);
+      return new Date(from.getTime() + intervalMs);
     }
 
-    let candidate = new Date(baseline.getTime() + intervalMinutes * 60_000);
+    let candidate = new Date(baseline.getTime() + intervalMs);
     while (candidate.getTime() <= from.getTime()) {
-      candidate = new Date(candidate.getTime() + intervalMinutes * 60_000);
+      candidate = new Date(candidate.getTime() + intervalMs);
     }
     return candidate;
   }
@@ -326,8 +334,12 @@ export class SchedulerEngine {
     });
 
     const consecutiveFailures = runStatus === "failed" ? schedule.consecutiveFailures + 1 : 0;
+    const runsCompleted = (schedule.runsCompleted ?? 0) + (runStatus !== "failed" ? 1 : 0);
     const shouldAutoPause = consecutiveFailures >= FAILURE_AUTO_PAUSE_THRESHOLD;
     const shouldWarn = consecutiveFailures >= FAILURE_NOTIFY_THRESHOLD;
+
+    // Check if bounded schedule (maxRuns) is complete
+    const maxRunsReached = schedule.pattern.maxRuns != null && runsCompleted >= schedule.pattern.maxRuns;
 
     if (shouldWarn && runStatus === "failed") {
       await this.sender.sendResponse(
@@ -336,13 +348,22 @@ export class SchedulerEngine {
       );
     }
 
+    if (maxRunsReached && !shouldAutoPause) {
+      await this.sender.sendResponse(
+        schedule.chatId,
+        `✅ Schedule "${schedule.action.title}" completed all ${schedule.pattern.maxRuns} runs.`,
+      );
+    }
+
     const nextStatus = shouldAutoPause
       ? "paused"
-      : runStatus === "failed"
-        ? "degraded"
-        : schedule.pattern.type === "once"
-          ? "completed"
-          : "active";
+      : maxRunsReached
+        ? "completed"
+        : runStatus === "failed"
+          ? "degraded"
+          : schedule.pattern.type === "once"
+            ? "completed"
+            : "active";
 
     await this.repository.updateSchedule({
       ...schedule,
@@ -351,6 +372,7 @@ export class SchedulerEngine {
       updatedAtIso: finishedAt.toISOString(),
       nextRunAtIso: undefined,
       consecutiveFailures,
+      runsCompleted,
     });
 
     await this.arm(schedule.id);

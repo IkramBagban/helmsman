@@ -149,6 +149,7 @@ export class JsonScheduleRepository {
       createdAtIso: now,
       updatedAtIso: now,
       consecutiveFailures: 0,
+      runsCompleted: 0,
     };
 
     await this.enqueueWrite(async () => {

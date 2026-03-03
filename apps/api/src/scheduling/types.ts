@@ -19,7 +19,10 @@ export interface SchedulePattern {
   readonly timezone: string;
   readonly runAtIso?: string;
   readonly intervalMinutes?: number;
+  readonly intervalSeconds?: number;
   readonly timesOfDay?: readonly string[];
+  /** Maximum number of runs before auto-completing (interval patterns). */
+  readonly maxRuns?: number;
 }
 
 export interface ScheduleAction {
@@ -47,6 +50,8 @@ export interface ScheduleRecord {
   readonly lastRunAtIso?: string;
   readonly nextRunAtIso?: string;
   readonly consecutiveFailures: number;
+  /** Number of completed runs — used with maxRuns to auto-complete interval schedules. */
+  readonly runsCompleted: number;
 }
 
 export interface PendingScheduleDraft {

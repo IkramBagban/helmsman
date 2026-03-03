@@ -20,7 +20,11 @@ const formatPattern = (pattern: SchedulePattern): string => {
     return pattern.runAtIso ? `once at ${pattern.runAtIso}` : "once (unknown time)";
   }
   if (pattern.type === "interval") {
-    return `every ${pattern.intervalMinutes ?? 0} minute(s)`;
+    const intervalLabel = pattern.intervalSeconds
+      ? `every ${pattern.intervalSeconds} second(s)`
+      : `every ${pattern.intervalMinutes ?? 0} minute(s)`;
+    const boundLabel = pattern.maxRuns ? ` (max ${pattern.maxRuns} runs)` : "";
+    return `${intervalLabel}${boundLabel}`;
   }
   return `daily at ${(pattern.timesOfDay ?? []).join(", ")} (${pattern.timezone})`;
 };
