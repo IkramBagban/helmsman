@@ -756,8 +756,31 @@ describe("HelmsmanOrchestrator", () => {
 
       const response = await orchestrator.handleMessage(baseMessage);
 
-      expect(response.text.length).toBeLessThanOrEqual(3020); // 3000 + truncation notice
-      expect(response.text).toContain("…(truncated)");
+      expect(response.text.length).toBeLessThanOrEqual(3900);
+      expect(response.text).toContain("Response shortened for chat");
+    });
+
+    it("should not truncate long responses for non-Telegram platforms", async () => {
+      const longText = "A".repeat(5000);
+      devopsAgent = createMockAgent(() => ({
+        text: longText,
+        toolResults: [],
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        platform: "slack",
+      });
+
+      expect(response.text.length).toBe(5000);
+      expect(response.text).not.toContain("Response shortened for chat");
     });
   });
 });

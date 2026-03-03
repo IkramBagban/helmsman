@@ -47,7 +47,7 @@ export async function handleChatIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(result.text),
+    text: truncateForTelegram(result.text, message.platform),
   };
 }
 
@@ -84,7 +84,7 @@ export async function handleQueryIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(result.text),
+    text: truncateForTelegram(result.text, message.platform),
   };
 }
 
@@ -164,7 +164,7 @@ export async function handleSingleActionIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(result.text),
+    text: truncateForTelegram(result.text, message.platform),
   };
 }
 
@@ -245,6 +245,6 @@ export async function handleMultiStepIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(executionResult.text),
+    text: truncateForTelegram(executionResult.text, message.platform),
   };
 }

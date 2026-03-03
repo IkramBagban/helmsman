@@ -5,9 +5,38 @@ import { previewText } from "../trace-logger.js";
 import { MAX_RESPONSE_LENGTH } from "./constants.js";
 import type { ApprovalValidationFailure, ApprovalValidationResult } from "./types.js";
 
-export function truncateForTelegram(text: string): string {
-  if (text.length <= MAX_RESPONSE_LENGTH) return text;
-  return `${text.slice(0, MAX_RESPONSE_LENGTH)}\n\n…(truncated)`;
+const TRUNCATION_HINT = "\n\n↳ Response shortened for chat. Ask \"continue\" to see more.";
+
+export function truncateForTelegram(text: string, platform: string = "telegram"): string {
+  if (platform !== "telegram") {
+    return text;
+  }
+
+  if (text.length <= MAX_RESPONSE_LENGTH) {
+    return text;
+  }
+
+  const maxContentLength = MAX_RESPONSE_LENGTH - TRUNCATION_HINT.length;
+  if (maxContentLength <= 0) {
+    return text.slice(0, MAX_RESPONSE_LENGTH);
+  }
+
+  const sliced = text.slice(0, maxContentLength);
+  const boundaryCandidates = [
+    sliced.lastIndexOf("\n\n"),
+    sliced.lastIndexOf("\n"),
+    sliced.lastIndexOf(". "),
+    sliced.lastIndexOf("! "),
+    sliced.lastIndexOf("? "),
+  ];
+
+  const bestBoundary = Math.max(...boundaryCandidates);
+  const minBoundary = Math.floor(maxContentLength * 0.6);
+  const safeSlice = bestBoundary >= minBoundary
+    ? sliced.slice(0, bestBoundary + 1)
+    : sliced;
+
+  return `${safeSlice.trimEnd()}${TRUNCATION_HINT}`;
 }
 
 export function summarizeAgentRun(result: unknown): Record<string, unknown> {

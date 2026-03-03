@@ -1,5 +1,5 @@
-/** Max characters in a final response - Telegram-safe. */
-export const MAX_RESPONSE_LENGTH = 3000;
+/** Max characters in a final response - Telegram-safe with buffer under 4096. */
+export const MAX_RESPONSE_LENGTH = 3900;
 /** Max tool iterations for the DevOps agent. */
 export const MAX_STEPS = 8;
 /** Max short-term conversation turns retained in-memory per chat. */
