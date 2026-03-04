@@ -250,6 +250,13 @@ export class SchedulerEngine {
     }
   }
 
+  public stop(): void {
+    for (const [id, timer] of this.timers) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+  }
+
   public async arm(scheduleId: string): Promise<void> {
     this.clearTimer(scheduleId);
     const schedule = await this.repository.getScheduleById(scheduleId);
@@ -434,10 +441,14 @@ export class SchedulerEngine {
       runStatus = "failed";
       errorSummary = error instanceof Error ? error.message : String(error);
       resultSummary = errorSummary;
-      await this.sender.sendResponse(
-        schedule.chatId,
-        `⚠️ Scheduled task failed (${schedule.action.title}): ${errorSummary}`,
-      );
+      try {
+        await this.sender.sendResponse(
+          schedule.chatId,
+          `⚠️ Scheduled task failed (${schedule.action.title}): ${errorSummary}`,
+        );
+      } catch (sendError) {
+        console.error(`Failed to send error notification for schedule ${schedule.id}:`, sendError);
+      }
     }
 
     const finishedAt = new Date();
@@ -465,17 +476,25 @@ export class SchedulerEngine {
     const maxRunsReached = schedule.pattern.maxRuns != null && runsCompleted >= schedule.pattern.maxRuns;
 
     if (shouldWarn && runStatus === "failed") {
-      await this.sender.sendResponse(
-        schedule.chatId,
-        `⚠️ Schedule ${schedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
-      );
+      try {
+        await this.sender.sendResponse(
+          schedule.chatId,
+          `⚠️ Schedule ${schedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
+        );
+      } catch (sendError) {
+        console.error(`Failed to send failure warning for schedule ${schedule.id}:`, sendError);
+      }
     }
 
     if (maxRunsReached && !shouldAutoPause) {
-      await this.sender.sendResponse(
-        schedule.chatId,
-        `✅ Schedule "${schedule.action.title}" completed all ${schedule.pattern.maxRuns} runs.`,
-      );
+      try {
+        await this.sender.sendResponse(
+          schedule.chatId,
+          `✅ Schedule "${schedule.action.title}" completed all ${schedule.pattern.maxRuns} runs.`,
+        );
+      } catch (sendError) {
+        console.error(`Failed to send completion notification for schedule ${schedule.id}:`, sendError);
+      }
     }
 
     const nextStatus = shouldAutoPause

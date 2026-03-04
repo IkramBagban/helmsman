@@ -105,6 +105,13 @@ export const createTelegramWebhookHandler = async (
 
   await schedulingService.start();
 
+  // ── Graceful shutdown: clear all armed timers ───────────────────────────
+  const handleShutdown = (): void => {
+    schedulingService.stop();
+  };
+  process.on("SIGTERM", handleShutdown);
+  process.on("SIGINT", handleShutdown);
+
   return {
     async handle(request: Request): Promise<Response> {
       try {

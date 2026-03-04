@@ -159,6 +159,46 @@ describe("SchedulingService.createSchedule", () => {
     expect(approved).not.toBeNull();
     expect(approved).toContain("Schedule created");
   });
+
+  it("rejects when per-user schedule limit is reached", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "helmsman-schedule-test-"));
+    tempDirs.push(dataDir);
+
+    const service = new SchedulingService({
+      dataDir,
+      sender: createSender(),
+      orchestrator: createOrchestrator(),
+      draftTtlMinutes: 15,
+      runRetention: 20,
+      maxSchedulesPerUser: 3,
+    });
+    await service.start();
+
+    const makeSchedule = (index: number) =>
+      service.createSchedule({
+        source: {
+          platform: "telegram",
+          chatId: "chat-1",
+          userId: "user-1",
+          messageId: `msg-limit-${index}`,
+          originalText: `reminder ${index}`,
+        },
+        action: { type: "reminder", title: `reminder ${index}`, reminderText: `Reminder ${index}` },
+        pattern: { type: "once", runAtIso: new Date(Date.now() + 3_600_000).toISOString(), timezone: "UTC" },
+      });
+
+    const r1 = await makeSchedule(1);
+    const r2 = await makeSchedule(2);
+    const r3 = await makeSchedule(3);
+    expect(r1.success).toBe(true);
+    expect(r2.success).toBe(true);
+    expect(r3.success).toBe(true);
+
+    const r4 = await makeSchedule(4);
+    expect(r4.success).toBe(false);
+    expect(r4.message).toContain("maximum");
+    expect(r4.message).toContain("3");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -98,12 +98,15 @@ export interface SchedulingServiceConfig {
   readonly orchestrator: HelmsmanOrchestrator;
   readonly draftTtlMinutes?: number;
   readonly runRetention?: number;
+  /** Maximum active schedules per user per chat. Defaults to 25. */
+  readonly maxSchedulesPerUser?: number;
 }
 
 export class SchedulingService {
   private readonly repository: JsonScheduleRepository;
   private readonly engine: SchedulerEngine;
   private readonly draftTtlMinutes: number;
+  private readonly maxSchedulesPerUser: number;
   private startPromise: Promise<void> | null = null;
 
   public constructor(config: SchedulingServiceConfig) {
@@ -117,6 +120,7 @@ export class SchedulingService {
       orchestrator: config.orchestrator,
     });
     this.draftTtlMinutes = config.draftTtlMinutes ?? 15;
+    this.maxSchedulesPerUser = config.maxSchedulesPerUser ?? 25;
   }
 
   public async start(): Promise<void> {
@@ -127,6 +131,10 @@ export class SchedulingService {
       })();
     }
     await this.startPromise;
+  }
+
+  public stop(): void {
+    this.engine.stop();
   }
 
   // ── Approval flow (still used by /approve command in telegram route) ────
@@ -157,6 +165,16 @@ export class SchedulingService {
    */
   public async createSchedule(input: CreateScheduleInput): Promise<CreateScheduleResult> {
     const riskTier = classifyScheduleRisk(input.action, input.riskHint);
+
+    // ── Per-user schedule limit ──────────────────────────────────────
+    const existing = await this.repository.listSchedulesByOwner(input.source.userId, input.source.chatId);
+    const activeCount = existing.filter((s) => s.status === "active" || s.status === "degraded").length;
+    if (activeCount >= this.maxSchedulesPerUser) {
+      return {
+        success: false,
+        message: `You have reached the maximum of ${this.maxSchedulesPerUser} active schedules. Cancel some existing schedules first.`,
+      };
+    }
 
     if (requiresApprovalForSchedule(riskTier)) {
       const draft = await this.repository.createPendingDraft({
