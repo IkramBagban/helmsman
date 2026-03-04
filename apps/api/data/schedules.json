@@ -1,52 +1,5 @@
-{
-  "version": 1,
-  "schedules": [
-    {
-      "id": "4b0e3d5d-29f1-4477-9b52-68b296312cf3",
-      "ownerUserId": "<userId>",
-      "platform": "telegram",
-      "chatId": "<chatId>",
-      "sourceMessageId": "<messageId>",
-      "sourceText": "can you give me my aws cost biliing after one min? i want to see it.",
-      "action": {
-        "type": "agent_task",
-        "title": "AWS cost billing check",
-        "taskText": "show me my aws cost billing"
-      },
-      "pattern": {
-        "type": "once",
-        "timezone": "UTC",
-        "runAtIso": "2026-03-03T00:01:00Z"
-      },
-      "riskTier": "low_risk",
-      "status": "completed",
-      "createdAtIso": "2026-03-03T23:14:06.824Z",
-      "updatedAtIso": "2026-03-03T23:14:06.828Z",
-      "consecutiveFailures": 0
-    },
-    {
-      "id": "ba440acf-f0f1-4d79-b7a1-825134a03f0c",
-      "ownerUserId": "UNSPECIFIED",
-      "platform": "telegram",
-      "chatId": "UNSPECIFIED",
-      "sourceMessageId": "UNSPECIFIED",
-      "sourceText": "say me hi after 1min",
-      "action": {
-        "type": "reminder",
-        "title": "Say hi",
-        "reminderText": "Hi there!"
-      },
-      "pattern": {
-        "type": "once",
-        "timezone": "UTC",
-        "runAtIso": "2026-03-03T00:01:00Z"
-      },
-      "riskTier": "read_only",
-      "status": "completed",
-      "createdAtIso": "2026-03-03T23:17:15.917Z",
-      "updatedAtIso": "2026-03-03T23:17:15.921Z",
-      "consecutiveFailures": 0
-    }
-  ],
-  "pendingDrafts": []
-}
+        {
+          "version": 1,
+          "schedules": [],
+          "pendingDrafts": []
+        }
