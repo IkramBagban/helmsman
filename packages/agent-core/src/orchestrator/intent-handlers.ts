@@ -5,7 +5,13 @@ import type { Plan } from "../agents/planner.js";
 import { generatePlan } from "../agents/planner.js";
 import { logTrace } from "../trace-logger.js";
 import { MAX_STEPS } from "./constants.js";
-import { buildPrompt, formatPlan, summarizeAgentRun, truncateForTelegram, validateApprovalCommand } from "./helpers.js";
+import {
+  buildPrompt,
+  formatPlan,
+  summarizeAgentRun,
+  truncateForTelegram,
+  validateApprovalCommand,
+} from "./helpers.js";
 
 export interface IntentHandlerContext {
   readonly devopsAgent: Agent;
@@ -112,6 +118,7 @@ export async function handleSingleActionIntent(
   });
 
   const msgMeta = { chatId: message.chatId, userId: message.userId, messageId: message.messageId, platform: message.platform };
+
   const plannerPrompt = buildPrompt(message.text, conversationContext, msgMeta);
   const plan = await generatePlan(context.plannerAgent, plannerPrompt);
 

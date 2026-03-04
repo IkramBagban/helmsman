@@ -35,7 +35,6 @@ import {
   resumePendingAction as resumePendingActionFlow,
   runWithApproval as runWithApprovalFlow,
 } from "./orchestrator/approval-flow.js";
-import { shouldForceQueryIntent } from "./orchestrator/helpers.js";
 import {
   handleChatIntent,
   handleMultiStepIntent,
@@ -96,6 +95,51 @@ export class HelmsmanOrchestrator {
       this.state.recordTurn(message.chatId, "user", message.text);
       const conversationContext = this.state.getConversationContext(message.chatId);
 
+      const isScheduledExecution = message.metadata?.scheduled === true;
+
+      if (isScheduledExecution) {
+        logTrace("intent.classified", {
+          correlationId: message.correlationId,
+          chatId: message.chatId,
+          intent: "query",
+          confidence: 1,
+          reasoning: "override: scheduled_execution_no_rescheduling",
+        });
+
+        const scheduledPrompt = [
+          message.text,
+          "",
+          "Scheduled execution policy:",
+          "- This request is already running from a scheduler job.",
+          "- Do NOT create, modify, list, pause, resume, or cancel schedules.",
+          "- Execute the requested task immediately using non-scheduling tools.",
+        ].join("\n");
+
+        const response = await this.handleQuery(
+          {
+            ...message,
+            text: scheduledPrompt,
+          },
+          {
+            intent: "query",
+            confidence: 1,
+            reasoning: "override: scheduled_execution_no_rescheduling",
+          },
+          undefined,
+        );
+
+        this.state.recordTurn(message.chatId, "assistant", response.text);
+        logTrace("message.completed", {
+          correlationId: message.correlationId,
+          chatId: message.chatId,
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+          responsePreview: previewText(response.text),
+          mode: "scheduled_execution",
+        });
+        return response;
+      }
+
       const injectionCheck = detectPromptInjectionAttempt(message.text);
       if (injectionCheck.blocked) {
         logTrace("security.prompt_injection.blocked", {
@@ -118,10 +162,7 @@ export class HelmsmanOrchestrator {
 
       // 1. Classify intent
       const intent = await classifyIntent(this.routerAgent, message.text, conversationContext);
-      const effectiveIntent =
-        intent.intent === "chat" && shouldForceQueryIntent(message.text)
-          ? { ...intent, intent: "query" as const, reasoning: `${intent.reasoning} | override: aws-question->query` }
-          : intent;
+      const effectiveIntent = intent;
 
       logTrace("intent.classified", {
         correlationId: message.correlationId,

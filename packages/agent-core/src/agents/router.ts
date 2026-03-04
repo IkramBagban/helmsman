@@ -72,7 +72,12 @@ Examples: "set up a new staging environment with VPC, subnets, and security grou
 - Short imperative commands that target one resource are single_action, not multi_step.
 - Questions about state/status are always query, even if they mention specific resources.
 - ALL scheduling, reminder, and timer requests are single_action — never classify them as chat.
-- "list schedules" / "show my reminders" are single_action (they use the list_schedules tool).`;
+- "list schedules" / "show my reminders" are single_action (they use the list_schedules tool).
+- Conversation follow-ups inherit prior context. If the latest message is short (e.g., "yes", "first one", "do it at 8:05") and previous turns discuss scheduling/reminders, classify as single_action.
+- Distinguish app scheduler vs AWS Scheduler service:
+  - If user discusses reminders/timers/follow-up schedule updates, treat as app scheduling (single_action).
+  - Do NOT reinterpret scheduler-management wording as EC2 lifecycle actions unless explicitly requested.
+- If intent is genuinely ambiguous, keep the safest intent and include that uncertainty in reasoning.`;
 
 // ---------------------------------------------------------------------------
 // Router agent factory

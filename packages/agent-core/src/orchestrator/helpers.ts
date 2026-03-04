@@ -184,15 +184,6 @@ export function isLikelyQuestionForUser(text: string): boolean {
     || /\b(can you|could you|would you|please provide|please confirm|should i proceed|proceed\?)\b/.test(normalized);
 }
 
-export function shouldForceQueryIntent(text: string): boolean {
-  const normalized = text.toLowerCase();
-  const looksLikeQuestion = normalized.includes("?")
-    || /\b(what|why|how|when|which|difference|compare|default|limit|policy|quota|best practice|recommended)\b/.test(normalized);
-  const awsTopic = /\b(aws|ec2|s3|iam|cloudfront|rds|vpc|lambda|eks|route53|cloudwatch|dynamodb|kms|ecr|ecs)\b/.test(normalized);
-
-  return looksLikeQuestion && awsTopic;
-}
-
 export function formatPlan(plan: Plan): string {
   const lines: string[] = [
     `📋 **Plan: ${plan.summary}**`,
