@@ -467,33 +467,46 @@ export class SchedulerEngine {
       errorSummary,
     });
 
-    const consecutiveFailures = runStatus === "failed" ? (schedule.consecutiveFailures ?? 0) + 1 : 0;
-    const runsCompleted = (schedule.runsCompleted ?? 0) + (runStatus !== "failed" ? 1 : 0);
+    const latestSchedule = await this.repository.getScheduleById(schedule.id);
+    if (!latestSchedule) {
+      return;
+    }
+
+    if (latestSchedule.status === "cancelled" || latestSchedule.status === "paused") {
+      return;
+    }
+
+    if (latestSchedule.status === "completed") {
+      return;
+    }
+
+    const consecutiveFailures = runStatus === "failed" ? (latestSchedule.consecutiveFailures ?? 0) + 1 : 0;
+    const runsCompleted = (latestSchedule.runsCompleted ?? 0) + (runStatus !== "failed" ? 1 : 0);
     const shouldAutoPause = consecutiveFailures >= FAILURE_AUTO_PAUSE_THRESHOLD;
     const shouldWarn = consecutiveFailures >= FAILURE_NOTIFY_THRESHOLD;
 
     // Check if bounded schedule (maxRuns) is complete
-    const maxRunsReached = schedule.pattern.maxRuns != null && runsCompleted >= schedule.pattern.maxRuns;
+    const maxRunsReached = latestSchedule.pattern.maxRuns != null && runsCompleted >= latestSchedule.pattern.maxRuns;
 
     if (shouldWarn && runStatus === "failed") {
       try {
         await this.sender.sendResponse(
           schedule.chatId,
-          `⚠️ Schedule ${schedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
+          `⚠️ Schedule ${latestSchedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
         );
       } catch (sendError) {
-        console.error(`Failed to send failure warning for schedule ${schedule.id}:`, sendError);
+        console.error(`Failed to send failure warning for schedule ${latestSchedule.id}:`, sendError);
       }
     }
 
     if (maxRunsReached && !shouldAutoPause) {
       try {
         await this.sender.sendResponse(
-          schedule.chatId,
-          `✅ Schedule "${schedule.action.title}" completed all ${schedule.pattern.maxRuns} runs.`,
+          latestSchedule.chatId,
+          `✅ Schedule "${latestSchedule.action.title}" completed all ${latestSchedule.pattern.maxRuns} runs.`,
         );
       } catch (sendError) {
-        console.error(`Failed to send completion notification for schedule ${schedule.id}:`, sendError);
+        console.error(`Failed to send completion notification for schedule ${latestSchedule.id}:`, sendError);
       }
     }
 
@@ -503,12 +516,12 @@ export class SchedulerEngine {
         ? "completed"
         : runStatus === "failed"
           ? "degraded"
-          : schedule.pattern.type === "once"
+          : latestSchedule.pattern.type === "once"
             ? "completed"
             : "active";
 
     await this.repository.updateSchedule({
-      ...schedule,
+      ...latestSchedule,
       status: nextStatus,
       lastRunAtIso: finishedAt.toISOString(),
       updatedAtIso: finishedAt.toISOString(),
@@ -517,7 +530,9 @@ export class SchedulerEngine {
       runsCompleted,
     });
 
-    await this.arm(schedule.id);
+    if (nextStatus === "active" || nextStatus === "degraded") {
+      await this.arm(latestSchedule.id);
+    }
   }
 }
 
