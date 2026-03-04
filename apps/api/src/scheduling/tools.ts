@@ -105,10 +105,18 @@ Action types:
 - "reminder": send a text message to the user (e.g. "drink water", "standup time")
 - "http_ping": GET request to a URL
 
-You MUST pass chatId, userId, messageId, platform from the session metadata provided in the runtime context.`,
+You MUST pass chatId, userId, messageId, platform from the session metadata provided in the runtime context.
+
+Risk assessment — you MUST set riskHint:
+- "read_only": no side effects (reminders, reading data, listing resources)
+- "low_risk": minor side effects (HTTP pings, non-destructive checks)
+- "significant": modifies infrastructure (create, deploy, restart, scale, stop, update)
+- "destructive": deletes, removes, terminates, or wipes resources`,
     inputSchema: z.object({
       action: ScheduleActionSchema,
       pattern: SchedulePatternSchema,
+      riskHint: z.enum(["read_only", "low_risk", "significant", "destructive"])
+        .describe("Your assessment of how risky this scheduled action is. read_only=no side effects, low_risk=minor, significant=infra changes, destructive=deletes/removes/terminates."),
       platform: z.enum(["telegram", "slack"]).default("telegram"),
       chatId: z.string().describe("The chat ID where the schedule was requested."),
       userId: z.string().describe("The user ID who requested the schedule."),
@@ -154,6 +162,7 @@ You MUST pass chatId, userId, messageId, platform from the session metadata prov
         }
 
         const result = await schedulingService.createSchedule({
+          riskHint: input.riskHint,
           source: {
             platform: input.platform,
             chatId: input.chatId,

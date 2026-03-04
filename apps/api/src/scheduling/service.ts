@@ -8,6 +8,7 @@ import type {
   ScheduleAction,
   SchedulePattern,
   ScheduleRecord,
+  ScheduleRiskTier,
   ScheduleSourceContext,
 } from "./types.js";
 
@@ -49,6 +50,8 @@ export interface CreateScheduleInput {
   readonly source: ScheduleSourceContext;
   readonly action: ScheduleAction;
   readonly pattern: SchedulePattern;
+  /** LLM-provided risk assessment — used as primary signal, regex as safety-net. */
+  readonly riskHint?: ScheduleRiskTier;
 }
 
 export interface CreateScheduleResult {
@@ -147,7 +150,7 @@ export class SchedulingService {
    * with an approval token instead of auto-creating.
    */
   public async createSchedule(input: CreateScheduleInput): Promise<CreateScheduleResult> {
-    const riskTier = classifyScheduleRisk(input.action);
+    const riskTier = classifyScheduleRisk(input.action, input.riskHint);
 
     if (requiresApprovalForSchedule(riskTier)) {
       const draft = await this.repository.createPendingDraft({

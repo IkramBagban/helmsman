@@ -99,6 +99,13 @@ You know the entire AWS CLI surface. Common patterns:
 - **interval with maxRuns**: when user specifies a bounded duration, calculate maxRuns. E.g. "every 10 sec for 1 minute" → intervalSeconds: 10, maxRuns: 6. "Every 5 min for 1 hour" → intervalMinutes: 5, maxRuns: 12.
 - **daily_times**: for "every day at 9am and 6pm" → use timesOfDay array with HH:MM strings.
 
+#### Risk assessment (riskHint) — REQUIRED on every create_schedule call:
+- **read_only**: no side effects — reminders, reading/listing/checking data
+- **low_risk**: minor side effects — HTTP pings, non-destructive health checks
+- **significant**: modifies infrastructure — create, deploy, restart, scale, stop, update, write
+- **destructive**: deletes, removes, terminates, wipes, or purges resources
+- When in doubt, err on the side of higher risk. The system uses your assessment as the primary signal.
+
 #### Required metadata fields:
 - The runtime context includes session metadata: chatId, userId, platform, messageId. Pass these exactly as provided into the tool call.
 
