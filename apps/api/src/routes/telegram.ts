@@ -13,6 +13,8 @@ import { getCommandResponse } from "../telegram/commands.js";
 import { type DedupStore } from "../telegram/dedup.js";
 import { parseTelegramUpdate } from "../telegram/parser.js";
 import { TelegramSender } from "../telegram/sender.js";
+import { SchedulingService } from "../scheduling/service.js";
+import { createSchedulingTools } from "../scheduling/tools.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -31,6 +33,7 @@ export interface TelegramWebhookDependencies {
    * automatically using createHelmsman().
    */
   readonly orchestrator?: HelmsmanOrchestrator;
+  readonly schedulingService?: SchedulingService;
 }
 
 export interface TelegramMessageSender {
@@ -42,15 +45,6 @@ export interface TelegramMessageSender {
 export interface TelegramAgentService {
   handleMessage(message: NormalizedMessage): Promise<AgentResponse>;
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const truncateForTelegram = (text: string, maxLength: number = 3000): string => {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}\n\n…(truncated)`;
-};
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -67,8 +61,35 @@ export const createTelegramWebhookHandler = async (
   const sender = dependencies?.sender ?? new TelegramSender(env.telegramBotToken);
   const capabilityStore = dependencies?.capabilityStore ?? new InMemoryCapabilityStore();
 
-  // ── Bootstrap the Mastra orchestrator ───────────────────────────────────
-  const orchestrator: HelmsmanOrchestrator =
+  // ── Bootstrap scheduling service ────────────────────────────────────────
+  // We need a temporary orchestrator reference for the scheduling engine's
+  // run-time execution (it calls orchestrator.handleMessage for agent_task
+  // schedules). We'll create the real orchestrator with scheduling tools
+  // injected, then wire it up.
+  let resolvedOrchestrator: HelmsmanOrchestrator;
+
+  // Create scheduling service first (needs orchestrator for engine execution)
+  const schedulingService = dependencies?.schedulingService ?? new SchedulingService({
+    dataDir: env.scheduleDataDir,
+    sender,
+    // The orchestrator is set via a lazy proxy — it gets resolved after
+    // createHelmsman returns. This handles the circular dependency:
+    // scheduling tools → service, service engine → orchestrator, orchestrator → tools.
+    orchestrator: new Proxy({} as HelmsmanOrchestrator, {
+      get(_target, prop, receiver) {
+        if (!resolvedOrchestrator) {
+          throw new Error("Orchestrator not yet initialized");
+        }
+        return Reflect.get(resolvedOrchestrator, prop, receiver);
+      },
+    }),
+  });
+
+  // Create scheduling Mastra tools that delegate to the service
+  const schedulingTools = createSchedulingTools({ schedulingService });
+
+  // ── Bootstrap the Mastra orchestrator with scheduling tools ─────────────
+  resolvedOrchestrator =
     dependencies?.orchestrator ??
     (await createHelmsman({
       model: "google/gemini-2.0-flash",
@@ -79,7 +100,17 @@ export const createTelegramWebhookHandler = async (
       awsKnowledgeMcpApiKey: env.awsKnowledgeMcpApiKey,
       awsKnowledgeMcpTimeoutMs: env.awsKnowledgeMcpTimeoutMs,
       capabilityStore,
+      extraTools: schedulingTools,
     }));
+
+  await schedulingService.start();
+
+  // ── Graceful shutdown: clear all armed timers ───────────────────────────
+  const handleShutdown = (): void => {
+    schedulingService.stop();
+  };
+  process.on("SIGTERM", handleShutdown);
+  process.on("SIGINT", handleShutdown);
 
   return {
     async handle(request: Request): Promise<Response> {
@@ -129,8 +160,8 @@ export const createTelegramWebhookHandler = async (
         if (activateMatch?.[1] && activateMatch?.[2]) {
           const role = activateMatch[1].toLowerCase() as "operator" | "commander";
           const activationId = activateMatch[2].toUpperCase();
-          const activationResponse = await orchestrator.handleActivation(role, activationId, userId, chatId);
-          await sender.sendResponse(chatId, truncateForTelegram(activationResponse.text));
+          const activationResponse = await resolvedOrchestrator.handleActivation(role, activationId, userId, chatId);
+          await sender.sendResponse(chatId, activationResponse.text);
           return Response.json({ ok: true });
         }
 
@@ -143,13 +174,19 @@ export const createTelegramWebhookHandler = async (
             return Response.json({ ok: true });
           }
 
-          const approvalResponse = await orchestrator.handleApproval(
+          const scheduleApproval = await schedulingService.handleApproval(approvalId, userId, chatId);
+          if (scheduleApproval) {
+            await sender.sendResponse(chatId, scheduleApproval);
+            return Response.json({ ok: true });
+          }
+
+          const approvalResponse = await resolvedOrchestrator.handleApproval(
             approvalId,
             userId,
             chatId,
           );
 
-          await sender.sendResponse(chatId, truncateForTelegram(approvalResponse.text));
+          await sender.sendResponse(chatId, approvalResponse.text);
           return Response.json({ ok: true });
         }
 
@@ -157,17 +194,19 @@ export const createTelegramWebhookHandler = async (
         const confirmMatch = incomingText.match(/^\/confirm\s+([^\s]+)$/i);
         if (confirmMatch?.[1]) {
           const confirmationTarget = confirmMatch[1];
-          const confirmationResponse = await orchestrator.handleConfirmation(
+          const confirmationResponse = await resolvedOrchestrator.handleConfirmation(
             confirmationTarget,
             userId,
             chatId,
           );
 
-          await sender.sendResponse(chatId, truncateForTelegram(confirmationResponse.text));
+          await sender.sendResponse(chatId, confirmationResponse.text);
           return Response.json({ ok: true });
         }
 
         // ── Normal message → Mastra orchestrator ─────────────────────────
+        // All messages (including scheduling) go through the agent.
+        // The agent calls scheduling tools when it detects schedule intent.
         const normalizedMessage = parseTelegramUpdate(body, correlationId);
         if (!normalizedMessage) {
           return Response.json({ ok: true });
@@ -178,11 +217,8 @@ export const createTelegramWebhookHandler = async (
         }, 4000);
 
         try {
-          const agentResponse = await orchestrator.handleMessage(normalizedMessage);
-
-          // pending_approval — the orchestrator already embedded the
-          // /approve <id> command in the response text
-          await sender.sendResponse(chatId, truncateForTelegram(agentResponse.text));
+          const agentResponse = await resolvedOrchestrator.handleMessage(normalizedMessage);
+          await sender.sendResponse(chatId, agentResponse.text);
         } finally {
           clearInterval(typingTimer);
         }

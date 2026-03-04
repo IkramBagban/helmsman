@@ -42,6 +42,9 @@ Current interface strategy: **Telegram first**, then Slack.
 | [BEST_PRACTICES.md](./BEST_PRACTICES.md) | How the agent enforces best practices automatically |
 | [CHALLENGES.md](./CHALLENGES.md) | Hard problems and honest solutions |
 | [ROADMAP.md](./ROADMAP.md) | What to build first, second, and later |
+| [MAP.md](./MAP.md) | Canonical repository map: where features/files live |
+| [plans/INDEX.md](./plans/INDEX.md) | Active implementation plans + templates |
+| [plans/AI_PERSISTENT_MEMORY_PLAN.md](./plans/AI_PERSISTENT_MEMORY_PLAN.md) | Persistent-memory operating plan for AI agents |
 | [AGENT_SKILLS.md](./AGENT_SKILLS.md) | Industry patterns for skills + Helmsman skill architecture |
 | [agents/AGENT.md](./agents/AGENT.md) | Single entrypoint for coding agents (Codex/Antigravity/etc.) |
 | [agents/CONVENTIONS.md](./agents/CONVENTIONS.md) | Shared implementation conventions (no duplication) |

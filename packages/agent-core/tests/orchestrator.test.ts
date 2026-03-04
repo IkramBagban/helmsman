@@ -143,6 +143,44 @@ describe("HelmsmanOrchestrator", () => {
       expect(generateCall?.[1]?.maxSteps).toBe(8);
     });
 
+    it("should bypass router and prevent rescheduling for scheduled executions", async () => {
+      routerAgent = createMockAgent(() => ({
+        object: {
+          intent: "single_action",
+          confidence: 0.9,
+          reasoning: "should not be used",
+        },
+      }));
+
+      devopsAgent = createMockAgent((prompt: string) => ({
+        text: "Scheduled task done",
+        toolResults: [],
+        prompt,
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "get my AWS cost and usage summary",
+        metadata: { scheduled: true, scheduleId: "sch-1" },
+      });
+
+      expect(response.status).toBe("success");
+      expect(response.text).toContain("Scheduled task done");
+      expect(routerAgent.generate).toHaveBeenCalledTimes(0);
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(1);
+      const generateCall = devopsAgent.generate.mock.calls[0];
+      expect(generateCall?.[0]).toContain("Scheduled execution policy");
+      expect(generateCall?.[0]).toContain("Do NOT create, modify, list, pause, resume, or cancel schedules");
+      expect(generateCall?.[1]?.maxSteps).toBe(8);
+    });
+
     it("should route multi_step intents through planner", async () => {
       routerAgent = createMockAgent(() => ({
         object: {
@@ -756,8 +794,31 @@ describe("HelmsmanOrchestrator", () => {
 
       const response = await orchestrator.handleMessage(baseMessage);
 
-      expect(response.text.length).toBeLessThanOrEqual(3020); // 3000 + truncation notice
-      expect(response.text).toContain("…(truncated)");
+      expect(response.text.length).toBeLessThanOrEqual(3900);
+      expect(response.text).toContain("Response shortened for chat");
+    });
+
+    it("should not truncate long responses for non-Telegram platforms", async () => {
+      const longText = "A".repeat(5000);
+      devopsAgent = createMockAgent(() => ({
+        text: longText,
+        toolResults: [],
+      }));
+
+      orchestrator = new HelmsmanOrchestrator({
+        routerAgent,
+        devopsAgent,
+        plannerAgent,
+        responderAgent,
+      });
+
+      const response = await orchestrator.handleMessage({
+        ...baseMessage,
+        platform: "slack",
+      });
+
+      expect(response.text.length).toBe(5000);
+      expect(response.text).not.toContain("Response shortened for chat");
     });
   });
 });

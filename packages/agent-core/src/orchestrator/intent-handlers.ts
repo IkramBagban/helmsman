@@ -5,7 +5,13 @@ import type { Plan } from "../agents/planner.js";
 import { generatePlan } from "../agents/planner.js";
 import { logTrace } from "../trace-logger.js";
 import { MAX_STEPS } from "./constants.js";
-import { buildPrompt, formatPlan, summarizeAgentRun, truncateForTelegram, validateApprovalCommand } from "./helpers.js";
+import {
+  buildPrompt,
+  formatPlan,
+  summarizeAgentRun,
+  truncateForTelegram,
+  validateApprovalCommand,
+} from "./helpers.js";
 
 export interface IntentHandlerContext {
   readonly devopsAgent: Agent;
@@ -35,8 +41,15 @@ export async function handleChatIntent(
     chatId: message.chatId,
   });
 
-  const prompt = buildPrompt(message.text, conversationContext);
-  const result = await context.devopsAgent.generate(prompt);
+  const prompt = buildPrompt(message.text, conversationContext, {
+    chatId: message.chatId,
+    userId: message.userId,
+    messageId: message.messageId,
+    platform: message.platform,
+  });
+  const result = await context.devopsAgent.generate(prompt, {
+    maxSteps: MAX_STEPS,
+  });
 
   logTrace("handler.chat.completed", {
     correlationId: message.correlationId,
@@ -47,7 +60,7 @@ export async function handleChatIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(result.text),
+    text: truncateForTelegram(result.text, message.platform),
   };
 }
 
@@ -70,7 +83,12 @@ export async function handleQueryIntent(
     "- Do not rely on memory for AWS defaults/limits when tool grounding is possible.",
   ].join("\n");
 
-  const prompt = buildPrompt(queryPrompt, conversationContext);
+  const prompt = buildPrompt(queryPrompt, conversationContext, {
+    chatId: message.chatId,
+    userId: message.userId,
+    messageId: message.messageId,
+    platform: message.platform,
+  });
   const result = await context.devopsAgent.generate(prompt, {
     maxSteps: MAX_STEPS,
   });
@@ -84,7 +102,7 @@ export async function handleQueryIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(result.text),
+    text: truncateForTelegram(result.text, message.platform),
   };
 }
 
@@ -99,7 +117,9 @@ export async function handleSingleActionIntent(
     chatId: message.chatId,
   });
 
-  const plannerPrompt = buildPrompt(message.text, conversationContext);
+  const msgMeta = { chatId: message.chatId, userId: message.userId, messageId: message.messageId, platform: message.platform };
+
+  const plannerPrompt = buildPrompt(message.text, conversationContext, msgMeta);
   const plan = await generatePlan(context.plannerAgent, plannerPrompt);
 
   const isRiskyPlan = plan.overallRisk === "significant" || plan.overallRisk === "destructive";
@@ -150,7 +170,7 @@ export async function handleSingleActionIntent(
     );
   }
 
-  const prompt = buildPrompt(message.text, conversationContext);
+  const prompt = buildPrompt(message.text, conversationContext, msgMeta);
   const result = await context.devopsAgent.generate(prompt, {
     maxSteps: MAX_STEPS,
   });
@@ -164,7 +184,7 @@ export async function handleSingleActionIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(result.text),
+    text: truncateForTelegram(result.text, message.platform),
   };
 }
 
@@ -179,7 +199,8 @@ export async function handleMultiStepIntent(
     chatId: message.chatId,
   });
 
-  const plannerPrompt = buildPrompt(message.text, conversationContext);
+  const msgMeta = { chatId: message.chatId, userId: message.userId, messageId: message.messageId, platform: message.platform };
+  const plannerPrompt = buildPrompt(message.text, conversationContext, msgMeta);
   const plan = await generatePlan(context.plannerAgent, plannerPrompt);
 
   logTrace("handler.multi_step.plan_generated", {
@@ -245,6 +266,6 @@ export async function handleMultiStepIntent(
   return {
     correlationId: message.correlationId,
     status: "success",
-    text: truncateForTelegram(executionResult.text),
+    text: truncateForTelegram(executionResult.text, message.platform),
   };
 }

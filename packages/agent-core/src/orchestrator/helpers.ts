@@ -5,9 +5,38 @@ import { previewText } from "../trace-logger.js";
 import { MAX_RESPONSE_LENGTH } from "./constants.js";
 import type { ApprovalValidationFailure, ApprovalValidationResult } from "./types.js";
 
-export function truncateForTelegram(text: string): string {
-  if (text.length <= MAX_RESPONSE_LENGTH) return text;
-  return `${text.slice(0, MAX_RESPONSE_LENGTH)}\n\n…(truncated)`;
+const TRUNCATION_HINT = "\n\n↳ Response shortened for chat. Ask \"continue\" to see more.";
+
+export function truncateForTelegram(text: string, platform: string = "telegram"): string {
+  if (platform !== "telegram") {
+    return text;
+  }
+
+  if (text.length <= MAX_RESPONSE_LENGTH) {
+    return text;
+  }
+
+  const maxContentLength = MAX_RESPONSE_LENGTH - TRUNCATION_HINT.length;
+  if (maxContentLength <= 0) {
+    return text.slice(0, MAX_RESPONSE_LENGTH);
+  }
+
+  const sliced = text.slice(0, maxContentLength);
+  const boundaryCandidates = [
+    sliced.lastIndexOf("\n\n"),
+    sliced.lastIndexOf("\n"),
+    sliced.lastIndexOf(". "),
+    sliced.lastIndexOf("! "),
+    sliced.lastIndexOf("? "),
+  ];
+
+  const bestBoundary = Math.max(...boundaryCandidates);
+  const minBoundary = Math.floor(maxContentLength * 0.6);
+  const safeSlice = bestBoundary >= minBoundary
+    ? sliced.slice(0, bestBoundary + 1)
+    : sliced;
+
+  return `${safeSlice.trimEnd()}${TRUNCATION_HINT}`;
 }
 
 export function summarizeAgentRun(result: unknown): Record<string, unknown> {
@@ -155,15 +184,6 @@ export function isLikelyQuestionForUser(text: string): boolean {
     || /\b(can you|could you|would you|please provide|please confirm|should i proceed|proceed\?)\b/.test(normalized);
 }
 
-export function shouldForceQueryIntent(text: string): boolean {
-  const normalized = text.toLowerCase();
-  const looksLikeQuestion = normalized.includes("?")
-    || /\b(what|why|how|when|which|difference|compare|default|limit|policy|quota|best practice|recommended)\b/.test(normalized);
-  const awsTopic = /\b(aws|ec2|s3|iam|cloudfront|rds|vpc|lambda|eks|route53|cloudwatch|dynamodb|kms|ecr|ecs)\b/.test(normalized);
-
-  return looksLikeQuestion && awsTopic;
-}
-
 export function formatPlan(plan: Plan): string {
   const lines: string[] = [
     `📋 **Plan: ${plan.summary}**`,
@@ -200,13 +220,32 @@ export function formatPlan(plan: Plan): string {
   return lines.join("\n");
 }
 
-export function buildPrompt(userMessage: string, conversationContext?: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  const runtimeContext = [
-    `Runtime date (UTC): ${today}`,
+export interface PromptMetadata {
+  readonly chatId?: string;
+  readonly userId?: string;
+  readonly messageId?: string;
+  readonly platform?: string;
+}
+
+export function buildPrompt(
+  userMessage: string,
+  conversationContext?: string,
+  metadata?: PromptMetadata,
+): string {
+  const now = new Date();
+  const runtimeLines = [
+    `Runtime datetime (UTC): ${now.toISOString()}`,
     "Autonomy: resolve relative dates and contextual resource references yourself before asking the user.",
     "Source policy: use tools for facts; use aws_knowledge_lookup for AWS behavior/limits/defaults when uncertain.",
-  ].join("\n");
+  ];
+
+  if (metadata?.chatId) {
+    runtimeLines.push(
+      `Session metadata — platform: ${metadata.platform ?? "telegram"}, chatId: ${metadata.chatId}, userId: ${metadata.userId ?? "unknown"}, messageId: ${metadata.messageId ?? "unknown"}`,
+    );
+  }
+
+  const runtimeContext = runtimeLines.join("\n");
 
   if (!conversationContext) {
     return `${runtimeContext}\n\n${userMessage}`;

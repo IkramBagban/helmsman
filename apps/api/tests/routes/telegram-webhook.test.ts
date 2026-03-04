@@ -14,6 +14,7 @@ const baseEnv: ApiEnv = {
   telegramBotToken: "test-bot-token",
   telegramWebhookSecret: "test-webhook-secret-1234",
   llmProvider: "echo",
+  scheduleDataDir: "./tmp-test-data",
 };
 
 const servers: Server[] = [];
