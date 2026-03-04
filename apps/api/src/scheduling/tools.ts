@@ -22,7 +22,7 @@ const SchedulePatternSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("once"),
     timezone: z.string().default("UTC").describe("IANA timezone, e.g. 'America/New_York'. Default UTC."),
-    runAtIso: z.string().optional().describe("ISO-8601 datetime for when to run. Provide either runAtIso OR delayMinutes OR delaySeconds."),
+    runAtIso: z.string().datetime().optional().describe("ISO-8601 datetime for when to run. Provide either runAtIso OR delayMinutes OR delaySeconds."),
     delayMinutes: z.number().positive().optional().describe("Run after this many minutes from now. Use for relative times >= 1 minute like 'in 5 minutes', 'after 1 hour' (=60)."),
     delaySeconds: z.number().int().positive().optional().describe("Run after this many seconds from now. Use for sub-minute delays like 'after 30 seconds', 'in 10 sec'. Minimum: 5."),
   }).refine(
@@ -42,7 +42,7 @@ const SchedulePatternSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("daily_times"),
     timezone: z.string().default("UTC").describe("IANA timezone. Default UTC."),
-    timesOfDay: z.array(z.string().regex(/^\d{2}:\d{2}$/)).min(1)
+    timesOfDay: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).min(1)
       .describe("Array of HH:MM times (24h format) to run each day."),
   }),
 ]);
@@ -132,33 +132,82 @@ Risk assessment — you MUST set riskHint:
     }),
     execute: async (input) => {
       try {
-        // Resolve delayMinutes/delaySeconds → runAtIso for "once" patterns
+        // ── Pre-flight semantic validation with LLM-friendly error messages ──
         let resolvedPattern = input.pattern;
-        if (resolvedPattern.type === "once" && !resolvedPattern.runAtIso) {
-          let delayMs = 0;
-          if (resolvedPattern.delayMinutes) {
-            delayMs = resolvedPattern.delayMinutes * 60_000;
-          } else if (resolvedPattern.delaySeconds) {
-            delayMs = Math.max(resolvedPattern.delaySeconds, 5) * 1_000;
+
+        if (resolvedPattern.type === "once") {
+          // Auto-resolve: if multiple timing fields given, pick by priority
+          // runAtIso (most explicit) > delayMinutes (common) > delaySeconds (sub-minute)
+          if (resolvedPattern.runAtIso) {
+            // Absolute time wins — clear delay fields
+            resolvedPattern = { ...resolvedPattern, delayMinutes: undefined, delaySeconds: undefined };
+          } else if (resolvedPattern.delayMinutes && resolvedPattern.delaySeconds) {
+            // Both delays provided — use delayMinutes (larger granularity, likely intentional)
+            resolvedPattern = { ...resolvedPattern, delaySeconds: undefined };
           }
-          if (delayMs > 0) {
-            const runAt = new Date(Date.now() + delayMs);
+
+          // Convert delay → absolute runAtIso
+          if (!resolvedPattern.runAtIso) {
+            let delayMs = 0;
+            if (resolvedPattern.delayMinutes) {
+              delayMs = resolvedPattern.delayMinutes * 60_000;
+            } else if (resolvedPattern.delaySeconds) {
+              if (resolvedPattern.delaySeconds < 5) {
+                return { success: false, message: "delaySeconds must be at least 5. Try delaySeconds: 5 or higher." };
+              }
+              delayMs = resolvedPattern.delaySeconds * 1_000;
+            }
+            if (delayMs > 0) {
+              const runAt = new Date(Date.now() + delayMs);
+              resolvedPattern = {
+                type: "once" as const,
+                timezone: resolvedPattern.timezone,
+                runAtIso: runAt.toISOString(),
+              };
+            } else {
+              return { success: false, message: "Once pattern needs a time: provide runAtIso (ISO-8601), delayMinutes, or delaySeconds." };
+            }
+          }
+        }
+
+        if (resolvedPattern.type === "interval") {
+          // Auto-resolve: if both interval fields given, prefer intervalSeconds (more specific)
+          if (resolvedPattern.intervalMinutes && resolvedPattern.intervalSeconds) {
+            resolvedPattern = { ...resolvedPattern, intervalMinutes: undefined };
+          }
+
+          if (!resolvedPattern.intervalMinutes && !resolvedPattern.intervalSeconds) {
+            return { success: false, message: "Interval pattern needs either intervalMinutes or intervalSeconds." };
+          }
+
+          if (resolvedPattern.intervalSeconds != null && resolvedPattern.intervalSeconds < 5) {
+            return { success: false, message: "intervalSeconds must be at least 5. Try intervalSeconds: 5 or higher." };
+          }
+
+          // Normalize the pattern for the engine
+          if (!resolvedPattern.intervalMinutes && resolvedPattern.intervalSeconds) {
             resolvedPattern = {
-              type: "once" as const,
+              type: "interval" as const,
               timezone: resolvedPattern.timezone,
-              runAtIso: runAt.toISOString(),
+              intervalSeconds: resolvedPattern.intervalSeconds,
+              maxRuns: resolvedPattern.maxRuns,
             };
           }
         }
 
-        // Normalize intervalSeconds into the pattern for the engine
-        if (resolvedPattern.type === "interval" && !resolvedPattern.intervalMinutes && resolvedPattern.intervalSeconds) {
-          resolvedPattern = {
-            type: "interval" as const,
-            timezone: resolvedPattern.timezone,
-            intervalSeconds: Math.max(resolvedPattern.intervalSeconds, 5),
-            maxRuns: resolvedPattern.maxRuns,
-          };
+        if (resolvedPattern.type === "daily_times") {
+          if (!resolvedPattern.timesOfDay || resolvedPattern.timesOfDay.length === 0) {
+            return { success: false, message: "daily_times pattern needs at least one time in timesOfDay array (HH:MM format, 24h)." };
+          }
+        }
+
+        // ── Validate action fields ──
+        if (input.action.type === "http_ping" && "url" in input.action) {
+          try {
+            new URL(input.action.url);
+          } catch {
+            return { success: false, message: `Invalid URL: "${input.action.url}". Provide a valid URL starting with https://.` };
+          }
         }
 
         const result = await schedulingService.createSchedule({
@@ -175,9 +224,10 @@ Risk assessment — you MUST set riskHint:
         });
         return result;
       } catch (error) {
+        const msg = error instanceof Error ? error.message : "Failed to create schedule.";
         return {
           success: false,
-          message: error instanceof Error ? error.message : "Failed to create schedule.",
+          message: `Schedule creation failed: ${msg}. Check the pattern and action fields, then retry.`,
         };
       }
     },

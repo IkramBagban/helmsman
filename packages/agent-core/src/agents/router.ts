@@ -51,8 +51,12 @@ Examples: "how many EC2 instances do I have?", "show me open PRs on the repo",
 ### single_action
 User wants ONE infrastructure operation performed. May involve a single tool call that
 modifies something (create, update, delete, scale, deploy, etc.).
+This also includes ALL scheduling requests — reminders, recurring tasks, schedule management.
 Examples: "tag that instance as production", "create an S3 bucket named logs-2024",
-"stop the bastion instance", "scale the ASG to 3"
+"stop the bastion instance", "scale the ASG to 3",
+"remind me to drink water in 5 min", "check billing every 6 hours",
+"say hello every 10 sec for 1 minute", "cancel my schedules",
+"list my reminders", "pause the billing check"
 
 ### multi_step
 User wants a complex operation that involves multiple sequential steps, potentially
@@ -66,7 +70,9 @@ Examples: "set up a new staging environment with VPC, subnets, and security grou
 - When in doubt between query and single_action, prefer query (safer).
 - When in doubt between single_action and multi_step, prefer single_action.
 - Short imperative commands that target one resource are single_action, not multi_step.
-- Questions about state/status are always query, even if they mention specific resources.`;
+- Questions about state/status are always query, even if they mention specific resources.
+- ALL scheduling, reminder, and timer requests are single_action — never classify them as chat.
+- "list schedules" / "show my reminders" are single_action (they use the list_schedules tool).`;
 
 // ---------------------------------------------------------------------------
 // Router agent factory

@@ -41,7 +41,9 @@ export async function handleChatIntent(
     messageId: message.messageId,
     platform: message.platform,
   });
-  const result = await context.devopsAgent.generate(prompt);
+  const result = await context.devopsAgent.generate(prompt, {
+    maxSteps: MAX_STEPS,
+  });
 
   logTrace("handler.chat.completed", {
     correlationId: message.correlationId,
