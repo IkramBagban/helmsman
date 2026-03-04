@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
 import type { NormalizedMessage } from "@helmsman/shared";
@@ -10,6 +12,8 @@ import type { ScheduleRecord, ScheduleRunRecord } from "./types.js";
 const MAX_DELAY_MS = 2_147_000_000;
 const FAILURE_NOTIFY_THRESHOLD = 3;
 const FAILURE_AUTO_PAUSE_THRESHOLD = 5;
+const HTTP_PING_TIMEOUT_MS = 10_000;
+const LOCAL_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
 
 const toIso = (date: Date): string => date.toISOString();
 
@@ -33,7 +37,10 @@ const zonedTimeKey = (date: Date, timezone: string): string => {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return formatter.format(date).replace(":", ":");
+  const parts = formatter.formatToParts(date);
+  const hour = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${hour}:${minute}`;
 };
 
 const findNextDailyRun = (timezone: string, timesOfDay: readonly string[], from: Date): Date | null => {
@@ -113,6 +120,109 @@ const computeNextRun = (schedule: ScheduleRecord, from: Date = new Date()): Date
   }
 
   return null;
+};
+
+const isPrivateIpv4 = (ip: string): boolean => {
+  const parts = ip.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return true;
+  }
+
+  const a = parts[0];
+  const b = parts[1];
+  if (a == null || b == null) {
+    return true;
+  }
+
+  if (a === 10 || a === 127 || a === 0) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+
+  return false;
+};
+
+const isPrivateIpv6 = (ip: string): boolean => {
+  const normalized = ip.toLowerCase();
+  if (normalized === "::1" || normalized === "::") {
+    return true;
+  }
+
+  if (normalized.startsWith("::ffff:")) {
+    const mapped = normalized.slice("::ffff:".length);
+    return isPrivateIpv4(mapped);
+  }
+
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
+    return true;
+  }
+
+  if (/^fe[89ab]/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isPrivateIpAddress = (value: string): boolean => {
+  const ipVersion = isIP(value);
+  if (ipVersion === 4) {
+    return isPrivateIpv4(value);
+  }
+  if (ipVersion === 6) {
+    return isPrivateIpv6(value);
+  }
+  return true;
+};
+
+const validateHttpPingTarget = async (rawUrl: string): Promise<{ safe: true; url: URL } | { safe: false; reason: string }> => {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { safe: false, reason: "Invalid URL" };
+  }
+
+  if (parsed.protocol !== "https:") {
+    return { safe: false, reason: "Only https:// URLs are allowed for scheduled HTTP checks." };
+  }
+
+  if (parsed.username || parsed.password) {
+    return { safe: false, reason: "Embedded credentials are not allowed in URLs." };
+  }
+
+  if (parsed.port && parsed.port !== "443") {
+    return { safe: false, reason: "Custom ports are not allowed for scheduled HTTP checks." };
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (LOCAL_HOSTNAMES.has(hostname)) {
+    return { safe: false, reason: "Localhost destinations are not allowed." };
+  }
+
+  if (isIP(hostname) > 0 && isPrivateIpAddress(hostname)) {
+    return { safe: false, reason: "Private or link-local IP destinations are not allowed." };
+  }
+
+  if (isIP(hostname) === 0) {
+    try {
+      const resolved = await lookup(hostname, { all: true, verbatim: true });
+      if (resolved.length === 0) {
+        return { safe: false, reason: "Could not resolve target host." };
+      }
+
+      const hasBlockedIp = resolved.some((entry) => isPrivateIpAddress(entry.address));
+      if (hasBlockedIp) {
+        return { safe: false, reason: "Target resolves to a private or link-local IP address." };
+      }
+    } catch {
+      return { safe: false, reason: "Failed to resolve target host." };
+    }
+  }
+
+  return { safe: true, url: parsed };
 };
 
 export interface SchedulerEngineConfig {
@@ -271,7 +381,20 @@ export class SchedulerEngine {
 
     try {
       if (schedule.action.type === "http_ping" && schedule.action.url) {
-        const response = await fetch(schedule.action.url, { method: "GET" });
+        const targetCheck = await validateHttpPingTarget(schedule.action.url);
+        if (!targetCheck.safe) {
+          throw new Error(targetCheck.reason);
+        }
+
+        const abortController = new AbortController();
+        const timeout = setTimeout(() => abortController.abort(), HTTP_PING_TIMEOUT_MS);
+
+        const response = await fetch(targetCheck.url.toString(), {
+          method: "GET",
+          redirect: "error",
+          signal: abortController.signal,
+        }).finally(() => clearTimeout(timeout));
+
         resultSummary = `HTTP ${response.status} from ${schedule.action.url}`;
         await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled HTTP check: ${resultSummary}`);
       } else if (schedule.action.type === "reminder") {
@@ -333,7 +456,7 @@ export class SchedulerEngine {
       errorSummary,
     });
 
-    const consecutiveFailures = runStatus === "failed" ? schedule.consecutiveFailures + 1 : 0;
+    const consecutiveFailures = runStatus === "failed" ? (schedule.consecutiveFailures ?? 0) + 1 : 0;
     const runsCompleted = (schedule.runsCompleted ?? 0) + (runStatus !== "failed" ? 1 : 0);
     const shouldAutoPause = consecutiveFailures >= FAILURE_AUTO_PAUSE_THRESHOLD;
     const shouldWarn = consecutiveFailures >= FAILURE_NOTIFY_THRESHOLD;
@@ -378,3 +501,8 @@ export class SchedulerEngine {
     await this.arm(schedule.id);
   }
 }
+
+export const __internal = {
+  isPrivateIpAddress,
+  validateHttpPingTarget,
+};

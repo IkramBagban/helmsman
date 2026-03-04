@@ -104,6 +104,7 @@ export class SchedulingService {
   private readonly repository: JsonScheduleRepository;
   private readonly engine: SchedulerEngine;
   private readonly draftTtlMinutes: number;
+  private startPromise: Promise<void> | null = null;
 
   public constructor(config: SchedulingServiceConfig) {
     this.repository = new JsonScheduleRepository({
@@ -119,8 +120,13 @@ export class SchedulingService {
   }
 
   public async start(): Promise<void> {
-    await this.repository.initialize();
-    await this.engine.start();
+    if (!this.startPromise) {
+      this.startPromise = (async () => {
+        await this.repository.initialize();
+        await this.engine.start();
+      })();
+    }
+    await this.startPromise;
   }
 
   // ── Approval flow (still used by /approve command in telegram route) ────

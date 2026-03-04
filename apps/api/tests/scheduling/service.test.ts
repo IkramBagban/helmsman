@@ -71,6 +71,25 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe("SchedulingService.createSchedule", () => {
+  it("allows repeated start calls without reinitialization errors", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "helmsman-schedule-test-"));
+    tempDirs.push(dataDir);
+
+    const service = new SchedulingService({
+      dataDir,
+      sender: createSender(),
+      orchestrator: createOrchestrator(),
+      draftTtlMinutes: 15,
+      runRetention: 20,
+    });
+
+    await service.start();
+    await service.start();
+
+    const result = await service.listSchedules("user-1", "chat-1");
+    expect(result.success).toBe(true);
+  });
+
   it("auto-creates low-risk schedules immediately", async () => {
     const service = await makeService();
 

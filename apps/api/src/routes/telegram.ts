@@ -47,15 +47,6 @@ export interface TelegramAgentService {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const truncateForTelegram = (text: string, maxLength: number = 3000): string => {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}\n\n…(truncated)`;
-};
-
-// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -163,7 +154,7 @@ export const createTelegramWebhookHandler = async (
           const role = activateMatch[1].toLowerCase() as "operator" | "commander";
           const activationId = activateMatch[2].toUpperCase();
           const activationResponse = await resolvedOrchestrator.handleActivation(role, activationId, userId, chatId);
-          await sender.sendResponse(chatId, truncateForTelegram(activationResponse.text));
+          await sender.sendResponse(chatId, activationResponse.text);
           return Response.json({ ok: true });
         }
 
@@ -178,7 +169,7 @@ export const createTelegramWebhookHandler = async (
 
           const scheduleApproval = await schedulingService.handleApproval(approvalId, userId, chatId);
           if (scheduleApproval) {
-            await sender.sendResponse(chatId, truncateForTelegram(scheduleApproval));
+            await sender.sendResponse(chatId, scheduleApproval);
             return Response.json({ ok: true });
           }
 
@@ -188,7 +179,7 @@ export const createTelegramWebhookHandler = async (
             chatId,
           );
 
-          await sender.sendResponse(chatId, truncateForTelegram(approvalResponse.text));
+          await sender.sendResponse(chatId, approvalResponse.text);
           return Response.json({ ok: true });
         }
 
@@ -202,7 +193,7 @@ export const createTelegramWebhookHandler = async (
             chatId,
           );
 
-          await sender.sendResponse(chatId, truncateForTelegram(confirmationResponse.text));
+          await sender.sendResponse(chatId, confirmationResponse.text);
           return Response.json({ ok: true });
         }
 
@@ -220,7 +211,7 @@ export const createTelegramWebhookHandler = async (
 
         try {
           const agentResponse = await resolvedOrchestrator.handleMessage(normalizedMessage);
-          await sender.sendResponse(chatId, truncateForTelegram(agentResponse.text));
+          await sender.sendResponse(chatId, agentResponse.text);
         } finally {
           clearInterval(typingTimer);
         }
