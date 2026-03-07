@@ -16,6 +16,7 @@ import {
 export interface IntentHandlerContext {
   readonly devopsAgent: Agent;
   readonly plannerAgent: Agent;
+  readonly responderAgent: Agent;
   readonly runWithApproval: (
     message: NormalizedMessage,
     command: string,
@@ -41,15 +42,22 @@ export async function handleChatIntent(
     chatId: message.chatId,
   });
 
-  const prompt = buildPrompt(message.text, conversationContext, {
-    chatId: message.chatId,
-    userId: message.userId,
-    messageId: message.messageId,
-    platform: message.platform,
-  });
-  const result = await context.devopsAgent.generate(prompt, {
-    maxSteps: MAX_STEPS,
-  });
+  const prompt = [
+    "Current mode: social conversation.",
+    "Respond as a normal engineer teammate in chat.",
+    "Use good judgment for tone and length based on the user's wording and context.",
+    "Be warm, concise, and non-repetitive; avoid canned assistant closings.",
+    "Answer direct social questions directly.",
+    "Do not force infrastructure framing unless the user asks for technical help.",
+    "If the user pivots to a real task, acknowledge and transition naturally.",
+    "",
+    conversationContext ? `Conversation context:\n${conversationContext}\n` : "",
+    `Latest user message: ${message.text}`,
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+
+  const result = await context.responderAgent.generate(prompt);
 
   logTrace("handler.chat.completed", {
     correlationId: message.correlationId,

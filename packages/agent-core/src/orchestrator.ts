@@ -398,6 +398,7 @@ export class HelmsmanOrchestrator {
       {
         devopsAgent: this.devopsAgent,
         plannerAgent: this.plannerAgent,
+        responderAgent: this.responderAgent,
         runWithApproval: this.runWithApproval.bind(this),
         generateElicitationResponse: this.generateElicitationResponse.bind(this),
       },
@@ -419,6 +420,7 @@ export class HelmsmanOrchestrator {
       {
         devopsAgent: this.devopsAgent,
         plannerAgent: this.plannerAgent,
+        responderAgent: this.responderAgent,
         runWithApproval: this.runWithApproval.bind(this),
         generateElicitationResponse: this.generateElicitationResponse.bind(this),
       },
@@ -444,6 +446,7 @@ export class HelmsmanOrchestrator {
       {
         devopsAgent: this.devopsAgent,
         plannerAgent: this.plannerAgent,
+        responderAgent: this.responderAgent,
         runWithApproval: this.runWithApproval.bind(this),
         generateElicitationResponse: this.generateElicitationResponse.bind(this),
       },
@@ -465,6 +468,7 @@ export class HelmsmanOrchestrator {
       {
         devopsAgent: this.devopsAgent,
         plannerAgent: this.plannerAgent,
+        responderAgent: this.responderAgent,
         runWithApproval: this.runWithApproval.bind(this),
         generateElicitationResponse: this.generateElicitationResponse.bind(this),
       },

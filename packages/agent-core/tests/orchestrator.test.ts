@@ -73,7 +73,7 @@ describe("HelmsmanOrchestrator", () => {
     }));
 
     responderAgent = createMockAgent((_prompt: string) => ({
-      text: "Formatted response",
+      text: "Yo, all good here. What's going on?",
     }));
 
     orchestrator = new HelmsmanOrchestrator({
@@ -85,17 +85,18 @@ describe("HelmsmanOrchestrator", () => {
   });
 
   describe("handleMessage", () => {
-    it("should route chat intents to devops agent without tools", async () => {
+    it("should route chat intents to responder agent", async () => {
       const response = await orchestrator.handleMessage(baseMessage);
 
       expect(response.status).toBe("success");
-      expect(response.text).toContain("Hey there");
+      expect(response.text).toContain("all good");
       expect(response.correlationId).toBe("test-corr-1");
 
       // Router should have been called once
       expect(routerAgent.generate).toHaveBeenCalledTimes(1);
-      // DevOps agent called for the chat response
-      expect(devopsAgent.generate).toHaveBeenCalledTimes(1);
+      // Responder agent called for the chat response
+      expect(responderAgent.generate).toHaveBeenCalledTimes(1);
+      expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
     });
 
     it("should block prompt injection override attempts before routing", async () => {
