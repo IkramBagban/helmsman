@@ -148,7 +148,11 @@ export async function attemptAutomaticRecoveryAfterFailure(
       ].join("\n");
 
       const recoveryResult = await context.devopsAgent.generate(
-        buildPrompt(recoveryPrompt, context.state.getConversationContext(pendingAction.chatId)),
+        buildPrompt(
+          recoveryPrompt,
+          context.state.getConversationContext(pendingAction.chatId),
+          { userId: pendingAction.userId, chatId: pendingAction.chatId }
+        ),
         { maxSteps: MAX_STEPS },
       );
 
