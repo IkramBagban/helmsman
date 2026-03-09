@@ -1,7 +1,5 @@
 import { Redis } from "ioredis";
 
-import { AppError } from "@helmsman/shared";
-
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 1000;
 

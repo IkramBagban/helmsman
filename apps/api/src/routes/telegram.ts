@@ -6,13 +6,15 @@ import {
   InMemoryCapabilityStore,
   type HelmsmanOrchestrator,
 } from "@helmsman/agent-core";
+import {
+  getCommandResponse,
+  parseTelegramUpdate,
+  TelegramSender,
+  type DedupStore,
+} from "@helmsman/transport";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
 
 import type { ApiEnv } from "../config.js";
-import { getCommandResponse } from "../telegram/commands.js";
-import { type DedupStore } from "../telegram/dedup.js";
-import { parseTelegramUpdate } from "../telegram/parser.js";
-import { TelegramSender } from "../telegram/sender.js";
 import { SchedulingService } from "../scheduling/service.js";
 import { createSchedulingTools } from "../scheduling/tools.js";
 

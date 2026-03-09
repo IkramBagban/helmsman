@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { parseTelegramUpdate } from "../../src/telegram/parser.js";
+import { parseTelegramUpdate } from "@helmsman/transport";
 
 describe("parseTelegramUpdate", () => {
   it("should parse a text update", () => {

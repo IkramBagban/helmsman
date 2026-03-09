@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { __internal } from "../../src/telegram/sender";
+import { __internal } from "@helmsman/transport";
 
 describe("sender internals", () => {
   it("should escape html", () => {

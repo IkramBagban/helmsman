@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { getCommandResponse } from "../../src/telegram/commands";
+import { getCommandResponse } from "@helmsman/transport";
 
 describe("getCommandResponse", () => {
   it("should return start response", () => {
