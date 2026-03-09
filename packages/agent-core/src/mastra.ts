@@ -16,6 +16,7 @@ import { shellExecuteTool } from "./tools/shell-execute.js";
 import { createAwsKnowledgeTool } from "./tools/aws-knowledge.js";
 import { createMastraGitHubTools } from "./tools/github-tools.js";
 import { createMastraDevopsTools } from "./tools/devops-tools.js";
+import { createAwsProvider } from "@helmsman/tools-aws";
 import { HelmsmanOrchestrator } from "./orchestrator.js";
 import { InMemoryCapabilityStore, type CapabilityStore } from "./capability-store.js";
 import { createRequestActionTool } from "@helmsman/action-gateway";
@@ -71,6 +72,15 @@ export async function createHelmsman(
     shell_execute: shellExecuteTool,
     request_action: createRequestActionTool(capabilityStore),
   };
+
+  const awsProvider = createAwsProvider(tools.request_action);
+  const extractId = (t: any) => t.id || t.name || Math.random().toString(36).substring(7);
+  Object.assign(
+    tools,
+    Object.fromEntries(awsProvider.observerTools.map(t => [extractId(t), t])),
+    Object.fromEntries(awsProvider.operatorTools.map(t => [extractId(t), t])),
+    Object.fromEntries(awsProvider.commanderTools.map(t => [extractId(t), t]))
+  );
 
   if (config?.awsKnowledgeMcpUrl) {
     tools.aws_knowledge_lookup = createAwsKnowledgeTool({

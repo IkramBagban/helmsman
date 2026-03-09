@@ -38,6 +38,34 @@ export interface AgentResponse {
 
 export type RiskTier = "read_only" | "low_risk" | "significant" | "destructive";
 
+export interface ProviderPackage {
+  /** Provider identifier: 'aws' | 'gcp' | 'github' | 'dns' | 'cloudflare' */
+  readonly name: string;
+
+  /** Display name shown to users */
+  readonly displayName: string;
+
+  /**
+   * Observer tools — agent can call directly, no approval needed.
+   * These must ONLY perform read operations. Validated in execute().
+   */
+  readonly observerTools: any[];
+
+  /**
+   * Operator tools — agent calls request_action(), user approves with /approve TOKEN.
+   * These perform create/modify operations. Validated in execute().
+   */
+  readonly operatorTools: any[];
+
+  /**
+   * Commander tools — agent calls request_action(), user confirms with /confirm RESOURCE_ID.
+   * These perform irreversible operations. Validated in execute().
+   * The agent CANNOT call these directly — they throw immediately if called without
+   * a valid approval token from the action gateway.
+   */
+  readonly commanderTools: any[];
+}
+
 export interface ToolDefinition {
   readonly name: string;
   readonly description: string;

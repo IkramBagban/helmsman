@@ -5,11 +5,12 @@ export interface ApiEnv {
   readonly nodeEnv: "development" | "production" | "test";
   readonly telegramBotToken: string;
   readonly telegramWebhookSecret: string;
-  readonly llmProvider: "openai" | "gemini" | "echo";
+  readonly llmProvider: "openai" | "gemini" | "echo" | "anthropic";
   readonly openAiApiKey?: string;
   readonly openAiBaseUrl?: string;
   readonly geminiApiKey?: string;
   readonly geminiBaseUrl?: string;
+  readonly anthropicApiKey?: string;
   readonly redisUrl?: string;
   readonly awsKnowledgeMcpUrl?: string;
   readonly awsKnowledgeMcpApiKey?: string;
@@ -28,8 +29,8 @@ const getRequired = (name: string): string => {
 
 export const getEnv = (): ApiEnv => {
   const providerValue = process.env.LLM_PROVIDER ?? "gemini";
-  if (providerValue !== "openai" && providerValue !== "gemini" && providerValue !== "echo") {
-    throw new AppError("ENV_INVALID", "LLM_PROVIDER must be one of: gemini, openai, echo");
+  if (providerValue !== "openai" && providerValue !== "gemini" && providerValue !== "echo" && providerValue !== "anthropic") {
+    throw new AppError("ENV_INVALID", "LLM_PROVIDER must be one of: gemini, openai, echo, anthropic");
   }
 
   const nodeEnvValue = process.env.NODE_ENV ?? "development";
@@ -60,6 +61,7 @@ export const getEnv = (): ApiEnv => {
       ?? process.env.GOOGLE_API_KEY
       ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
     geminiBaseUrl: process.env.GEMINI_BASE_URL,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     redisUrl: process.env.REDIS_URL,
     awsKnowledgeMcpUrl: process.env.AWS_KNOWLEDGE_MCP_URL,
     awsKnowledgeMcpApiKey: process.env.AWS_KNOWLEDGE_MCP_API_KEY,

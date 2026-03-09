@@ -781,6 +781,9 @@ describe("HelmsmanOrchestrator", () => {
   describe("truncation", () => {
     it("should truncate long responses for Telegram", async () => {
       const longText = "A".repeat(5000);
+      routerAgent = createMockAgent(() => ({
+        object: { intent: "query", confidence: 1, reasoning: "" },
+      }));
       devopsAgent = createMockAgent(() => ({
         text: longText,
         toolResults: [],
@@ -801,6 +804,9 @@ describe("HelmsmanOrchestrator", () => {
 
     it("should not truncate long responses for non-Telegram platforms", async () => {
       const longText = "A".repeat(5000);
+      routerAgent = createMockAgent(() => ({
+        object: { intent: "query", confidence: 1, reasoning: "" },
+      }));
       devopsAgent = createMockAgent(() => ({
         text: longText,
         toolResults: [],
