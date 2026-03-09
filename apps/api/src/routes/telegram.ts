@@ -91,11 +91,19 @@ export const createTelegramWebhookHandler = async (
   // Create scheduling Mastra tools that delegate to the service
   const schedulingTools = createSchedulingTools({ schedulingService });
 
+  // ── Determine LLM Model ─────────────────────────────────────────────────
+  let model = "google/gemini-2.0-flash";
+  if (env.llmProvider === "anthropic") {
+    model = "anthropic/claude-3-7-sonnet-20250219";
+  } else if (env.llmProvider === "openai") {
+    model = "openai/gpt-4o";
+  }
+
   // ── Bootstrap the Mastra orchestrator with scheduling tools ─────────────
   resolvedOrchestrator =
     dependencies?.orchestrator ??
     (await createHelmsman({
-      model: "google/gemini-2.0-flash",
+      model,
       githubToken: process.env.GITHUB_TOKEN,
       githubBaseUrl: process.env.GITHUB_API_BASE_URL,
       enableDevopsTools: true,
