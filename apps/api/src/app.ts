@@ -12,8 +12,8 @@ import {
   type TelegramWebhookDependencies,
   type TelegramWebhookHandler,
 } from "./routes/telegram.js";
+import { RedisCapabilityStore } from "@helmsman/action-gateway";
 import { InMemoryDedupStore, RedisDedupStore } from "@helmsman/transport";
-import { RedisCapabilityStore } from "./telegram/capability-store.js";
 
 export interface ApiAppDependencies {
   readonly telegram?: TelegramWebhookDependencies;

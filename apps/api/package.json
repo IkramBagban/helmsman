@@ -10,6 +10,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@helmsman/action-gateway": "*",
     "@helmsman/agent-core": "*",
     "@helmsman/transport": "*",
     "@helmsman/shared": "*",

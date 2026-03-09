@@ -13,6 +13,7 @@
       "name": "api",
       "version": "0.0.0",
       "dependencies": {
+        "@helmsman/action-gateway": "*",
         "@helmsman/agent-core": "*",
         "@helmsman/shared": "*",
         "@helmsman/transport": "*",
@@ -48,11 +49,24 @@
         "typescript": "5.9.2",
       },
     },
+    "packages/action-gateway": {
+      "name": "@helmsman/action-gateway",
+      "version": "0.0.0",
+      "dependencies": {
+        "ioredis": "^5.10.0",
+      },
+      "devDependencies": {
+        "@repo/typescript-config": "*",
+        "@types/node": "^22.15.3",
+        "typescript": "5.9.2",
+      },
+    },
     "packages/agent-core": {
       "name": "@helmsman/agent-core",
       "version": "0.0.0",
       "dependencies": {
         "@ai-sdk/google": "^3.0.34",
+        "@helmsman/action-gateway": "workspace:*",
         "@helmsman/audit": "workspace:*",
         "@helmsman/policy": "workspace:*",
         "@helmsman/shared": "*",
@@ -333,6 +347,8 @@
     "@grpc/grpc-js": ["@grpc/grpc-js@1.14.3", "", { "dependencies": { "@grpc/proto-loader": "^0.8.0", "@js-sdsl/ordered-map": "^4.4.2" } }, "sha512-Iq8QQQ/7X3Sac15oB6p0FmUg/klxQvXLeileoqrTRGJYLV+/9tubbr9ipz0GKHjmXVsgFPo/+W+2cA8eNcR+XA=="],
 
     "@grpc/proto-loader": ["@grpc/proto-loader@0.7.15", "", { "dependencies": { "lodash.camelcase": "^4.3.0", "long": "^5.0.0", "protobufjs": "^7.2.5", "yargs": "^17.7.2" }, "bin": { "proto-loader-gen-types": "build/bin/proto-loader-gen-types.js" } }, "sha512-tMXdRCfYVixjuFK+Hk0Q1s38gV9zDiDJfWL3h1rv4Qc39oILCu1TRTDt7+fGUI8K4G1Fj125Hx/ru3azECWTyQ=="],
+
+    "@helmsman/action-gateway": ["@helmsman/action-gateway@workspace:packages/action-gateway"],
 
     "@helmsman/agent-core": ["@helmsman/agent-core@workspace:packages/agent-core"],
 
