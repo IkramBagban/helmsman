@@ -14,6 +14,11 @@
 
 import type { Agent } from "@mastra/core/agent";
 import type { NormalizedMessage, AgentResponse } from "@helmsman/shared";
+import {
+  createActionCommandHandlers,
+  type ActionCommandHandlers,
+  type ActivationContinuationRecord,
+} from "@helmsman/action-gateway";
 
 import type { IntentClassification } from "./agents/router.js";
 import { classifyIntent } from "./agents/router.js";
@@ -57,6 +62,7 @@ export class HelmsmanOrchestrator {
   private readonly responderAgent: Agent;
   private readonly capabilityStore: CapabilityStore;
   private readonly state = new ConversationState();
+  private readonly commandHandlers: ActionCommandHandlers;
 
   constructor(config: HelmsmanConfig) {
     this.routerAgent = config.routerAgent;
@@ -64,6 +70,37 @@ export class HelmsmanOrchestrator {
     this.plannerAgent = config.plannerAgent;
     this.responderAgent = config.responderAgent;
     this.capabilityStore = config.capabilityStore ?? new InMemoryCapabilityStore();
+    this.commandHandlers = createActionCommandHandlers({
+      capabilityStore: this.capabilityStore,
+      consumeActivationContinuation: ({ role, activationId, userId, chatId }) =>
+        this.state.consumeActivationContinuation(role, activationId, userId, chatId) as ActivationContinuationRecord | null,
+      continueAfterActivation: async (continuation) => {
+        const continuationMessage: NormalizedMessage = {
+          platform: "telegram",
+          chatId: continuation.chatId,
+          messageId: `activation-${continuation.activationId}`,
+          userId: continuation.userId,
+          text: continuation.description,
+          timestamp: new Date(),
+          correlationId: continuation.correlationId,
+        };
+
+        const nextStep = await this.runWithApproval(
+          continuationMessage,
+          continuation.command,
+          continuation.riskTier,
+          continuation.description,
+        );
+
+        return {
+          correlationId: nextStep.correlationId,
+          status: nextStep.status,
+          text: nextStep.text,
+          metadata: nextStep.metadata,
+        };
+      },
+      executeApprovedAction: async (pendingAction) => await this.resumePendingAction(pendingAction, true),
+    });
   }
 
   /**
@@ -227,39 +264,11 @@ export class HelmsmanOrchestrator {
       chatId,
     });
 
-    const pendingAction = await this.capabilityStore.consumePendingActionByCode({
-      userId,
-      chatId,
-      value: approvalId,
-    });
-
-    if (!pendingAction) {
-      return {
-        correlationId: crypto.randomUUID(),
-        status: "error",
-        text: "Approval request not found, expired, or already used.",
-      };
-    }
-
-    return await this.resumePendingAction(pendingAction, true);
+    return await this.commandHandlers.handleApprovalByCode(approvalId, userId, chatId);
   }
 
   async handleConfirmation(target: string, userId: string, chatId: string): Promise<AgentResponse> {
-    const pendingAction = await this.capabilityStore.consumePendingActionByTarget({
-      userId,
-      chatId,
-      value: target.trim(),
-    });
-
-    if (!pendingAction) {
-      return {
-        correlationId: crypto.randomUUID(),
-        status: "error",
-        text: "Confirmation target not found, expired, or already used.",
-      };
-    }
-
-    return await this.resumePendingAction(pendingAction, true);
+    return await this.commandHandlers.handleConfirmationByTarget(target, userId, chatId);
   }
 
   async handleActivation(
@@ -268,59 +277,7 @@ export class HelmsmanOrchestrator {
     userId: string,
     chatId: string,
   ): Promise<AgentResponse> {
-    const activation = await this.capabilityStore.consumeActivation({
-      role,
-      activationId: activationId.toUpperCase(),
-      userId,
-      chatId,
-    });
-
-    if (!activation) {
-      return {
-        correlationId: crypto.randomUUID(),
-        status: "error",
-        text: "Activation request not found, expired, already used, or not owned by you.",
-      };
-    }
-
-    const state = await this.capabilityStore.activateRole({ role, userId, chatId });
-    const expiryMs = role === "operator" ? state.operator.expiresAtMs : state.commander.expiresAtMs;
-    const expiryText = expiryMs
-      ? new Date(expiryMs).toISOString().replace("T", " ").replace(".000Z", " UTC")
-      : "(unknown)";
-
-    const continuation = this.state.consumeActivationContinuation(role, activationId.toUpperCase(), userId, chatId);
-    if (!continuation) {
-      return {
-        correlationId: crypto.randomUUID(),
-        status: "success",
-        text: `${role === "operator" ? "Operator" : "Commander"} access is active until ${expiryText}.`,
-      };
-    }
-
-    const continuationMessage: NormalizedMessage = {
-      platform: "telegram",
-      chatId,
-      messageId: `activation-${activationId.toUpperCase()}`,
-      userId,
-      text: continuation.description,
-      timestamp: new Date(),
-      correlationId: continuation.correlationId,
-    };
-
-    const nextStep = await this.runWithApproval(
-      continuationMessage,
-      continuation.command,
-      continuation.riskTier,
-      continuation.description,
-    );
-
-    return {
-      correlationId: nextStep.correlationId,
-      status: nextStep.status,
-      text: nextStep.text,
-      metadata: nextStep.metadata,
-    };
+    return await this.commandHandlers.handleActivation(role, activationId, userId, chatId);
   }
 
   private async resumePendingAction(
