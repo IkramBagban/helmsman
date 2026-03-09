@@ -25,9 +25,16 @@ import { logTrace, redactForLog, previewText } from "../trace-logger.js";
 function wrapTypedTool<TParams>(
   tool: TypedTool<TParams>,
 ): any {
-  // Build a Zod schema from the tool's parameters definition.
-  // The parameters object has keys with { type, description } shape from JSON Schema.
-  const paramEntries = Object.entries(tool.definition.parameters as Record<string, { type?: string; description?: string; enum?: string[]; default?: unknown }>);
+  // Detect if parameters is a JSON Schema object (has 'type' or 'properties')
+  // or a flat mapping of parameter names to specs.
+  const rawParams = tool.definition.parameters as Record<string, any>;
+  const isJsonSchema = rawParams.type === 'object' && rawParams.properties;
+  
+  const parameters = isJsonSchema 
+    ? (rawParams.properties as Record<string, { type?: string; description?: string; enum?: string[]; default?: unknown }>)
+    : (rawParams as Record<string, { type?: string; description?: string; enum?: string[]; default?: unknown }>);
+
+  const paramEntries = Object.entries(parameters);
 
   const zodShape: Record<string, z.ZodType> = {};
   for (const [key, spec] of paramEntries) {

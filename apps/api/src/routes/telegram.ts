@@ -94,7 +94,7 @@ export const createTelegramWebhookHandler = async (
   // ── Determine LLM Model ─────────────────────────────────────────────────
   let model = "google/gemini-2.0-flash";
   if (env.llmProvider === "anthropic") {
-    model = "anthropic/claude-3-7-sonnet-20250219";
+    model = "anthropic/claude-sonnet-4-6";
   } else if (env.llmProvider === "openai") {
     model = "openai/gpt-4o";
   }
