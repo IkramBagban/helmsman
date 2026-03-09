@@ -1,6 +1,7 @@
 import type { Agent } from "@mastra/core/agent";
 import type { AgentResponse, NormalizedMessage } from "@helmsman/shared";
 import type { PendingActionRecord, CapabilityRole, CapabilityStore } from "../capability-store.js";
+import { createActionRequest } from "@helmsman/action-gateway";
 import { logTrace, previewText } from "../trace-logger.js";
 import type { Plan } from "../agents/planner.js";
 import type { ConversationState } from "./conversation-state.js";
@@ -329,61 +330,41 @@ export async function runWithApproval(
     };
   }
 
-  const requiredRole: CapabilityRole = riskTier === "destructive" ? "commander" : "operator";
-  const roleState = await context.capabilityStore.getRoleState(message.userId, message.chatId);
+  const actionRequest = await createActionRequest({
+    capabilityStore: context.capabilityStore,
+    userId: message.userId,
+    chatId: message.chatId,
+    riskTier,
+    description,
+    command,
+    correlationId: message.correlationId,
+    rememberActivationContinuation: (continuation) => {
+      context.state.rememberActivationContinuation({
+        role: continuation.role,
+        activationId: continuation.activationId,
+        userId: continuation.userId,
+        chatId: continuation.chatId,
+        command: continuation.command,
+        riskTier: continuation.riskTier,
+        description: continuation.description,
+        correlationId: continuation.correlationId,
+      });
+    },
+  });
 
-  const operatorActive = roleState.operator.active;
-  const commanderActive = roleState.commander.active;
-
-  if (!operatorActive && (requiredRole === "operator" || requiredRole === "commander")) {
-    const activation = await context.capabilityStore.createActivation({
-      role: "operator",
-      userId: message.userId,
-      chatId: message.chatId,
-    });
-
-    context.state.rememberActivationContinuation({
-      role: "operator",
-      activationId: activation.id,
-      userId: message.userId,
-      chatId: message.chatId,
-      command,
-      riskTier,
-      description,
-      correlationId: message.correlationId,
-    });
-
-    return {
-      correlationId: message.correlationId,
-      status: "pending_approval",
-      text: `Before I can run this safely, I need Operator access enabled for you.\n\nPlease send:\n/activate operator ${activation.id}\n\nI’ll continue automatically after that.`,
-    };
-  }
-
-  if (requiredRole === "commander" && !commanderActive) {
-    const activation = await context.capabilityStore.createActivation({
-      role: "commander",
-      userId: message.userId,
-      chatId: message.chatId,
-    });
-
-    context.state.rememberActivationContinuation({
-      role: "commander",
-      activationId: activation.id,
-      userId: message.userId,
-      chatId: message.chatId,
-      command,
-      riskTier,
-      description,
-      correlationId: message.correlationId,
-    });
+  if (actionRequest.type === "activation_required") {
+    const roleText = actionRequest.role === "operator"
+      ? "Before I can run this safely, I need Operator access enabled for you."
+      : "This is a destructive action, so Commander access is required first.";
 
     return {
       correlationId: message.correlationId,
       status: "pending_approval",
-      text: `This is a destructive action, so Commander access is required first.\n\nPlease send:\n/activate commander ${activation.id}\n\nI’ll continue automatically after that.`,
+      text: `${roleText}\n\nPlease send:\n/activate ${actionRequest.role} ${actionRequest.activationId}\n\nI’ll continue automatically after that.`,
     };
   }
+
+  const requiredRole: CapabilityRole = actionRequest.role;
 
   logTrace("workflow.approval.start", {
     correlationId: message.correlationId,
@@ -394,20 +375,7 @@ export async function runWithApproval(
     description,
   }, "warn");
 
-  const confirmationMode = requiredRole === "commander" ? "confirm_target" : "approve_code";
-  const confirmationTarget = crypto.randomUUID().replace(/-/g, "").slice(0, 6).toUpperCase();
-
-  const pendingAction = await context.capabilityStore.createPendingAction({
-    role: requiredRole,
-    userId: message.userId,
-    chatId: message.chatId,
-    runId: crypto.randomUUID(),
-    riskTier,
-    description,
-    command,
-    confirmationMode,
-    confirmationTarget,
-  });
+  const pendingAction = actionRequest.pendingAction;
 
   logTrace("workflow.approval.suspended", {
     correlationId: message.correlationId,
@@ -436,7 +404,7 @@ export async function runWithApproval(
     text: approvalText,
     metadata: {
       approvalId: pendingAction.id,
-      confirmationMode,
+      confirmationMode: pendingAction.confirmationMode,
       confirmationTarget: pendingAction.confirmationTarget,
       suspendedStep: "approval-gate",
     },

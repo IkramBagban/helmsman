@@ -19,7 +19,10 @@ const normalizeTranscriptLikeText = (text: string): string => {
     return trimmed;
   }
 
-  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   let lastUserLine = "";
 
   for (const line of lines) {
@@ -37,7 +40,7 @@ const normalizeTranscriptLikeText = (text: string): string => {
     }
 
     if (lastUserLine && !/^\//.test(line)) {
-      // Continuation of the last Ikram block
+      // Continuation of the last Ikram block.
       lastUserLine = `${lastUserLine} ${line}`.trim();
     }
   }

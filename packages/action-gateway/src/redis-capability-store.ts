@@ -1,11 +1,12 @@
 import type { Redis } from "ioredis";
+
 import type {
   CapabilityRole,
   CapabilityStore,
   PendingActionRecord,
   PendingActivation,
   RoleState,
-} from "@helmsman/agent-core";
+} from "./capability-store.js";
 
 const ACTIVATION_TTL_SEC = 5 * 60;
 const OPERATOR_TTL_MS = 30 * 60 * 1000;

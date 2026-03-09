@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from "bun:test";
-import { InMemoryDedupStore, RedisDedupStore } from "../../src/telegram/dedup.js";
+import { InMemoryDedupStore, RedisDedupStore } from "@helmsman/transport";
 
 describe("InMemoryDedupStore", () => {
   it("should deduplicate updates", async () => {

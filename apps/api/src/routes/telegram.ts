@@ -6,13 +6,16 @@ import {
   InMemoryCapabilityStore,
   type HelmsmanOrchestrator,
 } from "@helmsman/agent-core";
+import { interceptActionCommand } from "@helmsman/action-gateway";
+import {
+  getCommandResponse,
+  parseTelegramUpdate,
+  TelegramSender,
+  type DedupStore,
+} from "@helmsman/transport";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
 
 import type { ApiEnv } from "../config.js";
-import { getCommandResponse } from "../telegram/commands.js";
-import { type DedupStore } from "../telegram/dedup.js";
-import { parseTelegramUpdate } from "../telegram/parser.js";
-import { TelegramSender } from "../telegram/sender.js";
 import { SchedulingService } from "../scheduling/service.js";
 import { createSchedulingTools } from "../scheduling/tools.js";
 
@@ -155,52 +158,22 @@ export const createTelegramWebhookHandler = async (
           return Response.json({ ok: true });
         }
 
-        // ── Activation flow (/activate <role> <id>) ──────────────────────
-        const activateMatch = incomingText.match(/^\/activate\s+(operator|commander)\s+([A-Z0-9]{6})$/i);
-        if (activateMatch?.[1] && activateMatch?.[2]) {
-          const role = activateMatch[1].toLowerCase() as "operator" | "commander";
-          const activationId = activateMatch[2].toUpperCase();
-          const activationResponse = await resolvedOrchestrator.handleActivation(role, activationId, userId, chatId);
-          await sender.sendResponse(chatId, activationResponse.text);
-          return Response.json({ ok: true });
-        }
+        const interceptResult = await interceptActionCommand({
+          text: incomingText,
+          userId,
+          chatId,
+          handleActivation: async (role, activationId, runUserId, runChatId) =>
+            await resolvedOrchestrator.handleActivation(role, activationId, runUserId, runChatId),
+          handleApprovalByCode: async (approvalId, runUserId, runChatId) =>
+            await resolvedOrchestrator.handleApproval(approvalId, runUserId, runChatId),
+          handleConfirmationByTarget: async (target, runUserId, runChatId) =>
+            await resolvedOrchestrator.handleConfirmation(target, runUserId, runChatId),
+          handleScheduleApproval: async (approvalId, runUserId, runChatId) =>
+            await schedulingService.handleApproval(approvalId, runUserId, runChatId),
+        });
 
-        // ── Approval flow (/approve <id>) ────────────────────────────────
-        const approveMatch = incomingText.match(/^\/approve\s+([a-zA-Z0-9-]{6,40})$/i);
-        if (approveMatch) {
-          const approvalId = approveMatch[1];
-          if (!approvalId) {
-            await sender.sendResponse(chatId, "Invalid approval command. Use /approve <id>.");
-            return Response.json({ ok: true });
-          }
-
-          const scheduleApproval = await schedulingService.handleApproval(approvalId, userId, chatId);
-          if (scheduleApproval) {
-            await sender.sendResponse(chatId, scheduleApproval);
-            return Response.json({ ok: true });
-          }
-
-          const approvalResponse = await resolvedOrchestrator.handleApproval(
-            approvalId,
-            userId,
-            chatId,
-          );
-
-          await sender.sendResponse(chatId, approvalResponse.text);
-          return Response.json({ ok: true });
-        }
-
-        // ── Commander confirmation (/confirm <resourceId>) ───────────────
-        const confirmMatch = incomingText.match(/^\/confirm\s+([^\s]+)$/i);
-        if (confirmMatch?.[1]) {
-          const confirmationTarget = confirmMatch[1];
-          const confirmationResponse = await resolvedOrchestrator.handleConfirmation(
-            confirmationTarget,
-            userId,
-            chatId,
-          );
-
-          await sender.sendResponse(chatId, confirmationResponse.text);
+        if (interceptResult.handled) {
+          await sender.sendResponse(chatId, interceptResult.responseText);
           return Response.json({ ok: true });
         }
 

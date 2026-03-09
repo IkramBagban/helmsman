@@ -17,7 +17,8 @@ import { createAwsKnowledgeTool } from "./tools/aws-knowledge.js";
 import { createMastraGitHubTools } from "./tools/github-tools.js";
 import { createMastraDevopsTools } from "./tools/devops-tools.js";
 import { HelmsmanOrchestrator } from "./orchestrator.js";
-import type { CapabilityStore } from "./capability-store.js";
+import { InMemoryCapabilityStore, type CapabilityStore } from "./capability-store.js";
+import { createRequestActionTool } from "@helmsman/action-gateway";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -62,11 +63,13 @@ export async function createHelmsman(
   config?: HelmsmanFactoryConfig,
 ): Promise<HelmsmanOrchestrator> {
   const model = config?.model ?? "google/gemini-2.0-flash";
+  const capabilityStore = config?.capabilityStore ?? new InMemoryCapabilityStore();
 
   // ── Assemble tools ────────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Mastra tool types are covariant; safe to widen here
   const tools: Record<string, any> = {
     shell_execute: shellExecuteTool,
+    request_action: createRequestActionTool(capabilityStore),
   };
 
   if (config?.awsKnowledgeMcpUrl) {
@@ -117,6 +120,6 @@ export async function createHelmsman(
     devopsAgent,
     plannerAgent,
     responderAgent,
-    capabilityStore: config?.capabilityStore,
+    capabilityStore,
   });
 }

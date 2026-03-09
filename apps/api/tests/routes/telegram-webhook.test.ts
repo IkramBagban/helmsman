@@ -4,7 +4,7 @@ import type { Server } from "node:http";
 import { createApp } from "../../src/app.js";
 import type { ApiEnv } from "../../src/config.js";
 import type { TelegramMessageSender } from "../../src/routes/telegram.js";
-import { InMemoryDedupStore } from "../../src/telegram/dedup.js";
+import { InMemoryDedupStore } from "@helmsman/transport";
 import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
 import type { AgentResponse, NormalizedMessage } from "@helmsman/shared";
 

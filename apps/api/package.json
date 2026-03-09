@@ -10,7 +10,9 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@helmsman/action-gateway": "*",
     "@helmsman/agent-core": "*",
+    "@helmsman/transport": "*",
     "@helmsman/shared": "*",
     "express": "^5.2.1",
     "ioredis": "^5.10.0"
