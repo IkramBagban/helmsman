@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { __internal } from "../../src/scheduling/engine.js";
+import { __internal } from "@helmsman/scheduling";
 
 describe("SchedulerEngine http_ping target validation", () => {
   it("blocks non-https URLs", async () => {

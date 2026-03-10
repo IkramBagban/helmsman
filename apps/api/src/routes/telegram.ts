@@ -14,10 +14,10 @@ import {
   type DedupStore,
 } from "@helmsman/transport";
 import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
+import { SchedulingService, createSchedulingTools } from "@helmsman/scheduling";
 
 import type { ApiEnv } from "../config.js";
-import { SchedulingService } from "../scheduling/service.js";
-import { createSchedulingTools } from "../scheduling/tools.js";
+
 
 // ---------------------------------------------------------------------------
 // Interfaces

@@ -1,0 +1,20 @@
+{
+  "name": "@helmsman/scheduling",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@helmsman/agent-core": "*",
+    "@helmsman/shared": "*",
+    "@mastra/core": "^1.8.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "*",
+    "@types/node": "^22.15.3",
+    "typescript": "5.9.2"
+  }
+}

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
 import type { AgentResponse } from "@helmsman/shared";
 
-import { SchedulingService } from "../../src/scheduling/service.js";
-import type { TelegramMessageSender } from "../../src/routes/telegram.js";
+import { SchedulingService, type ScheduleMessageSender } from "@helmsman/scheduling";
+
 
 const tempDirs: string[] = [];
 
@@ -35,7 +35,7 @@ const createOrchestrator = (): HelmsmanOrchestrator =>
     }),
   }) as unknown as HelmsmanOrchestrator;
 
-const createSender = (): TelegramMessageSender => ({
+const createSender = (): ScheduleMessageSender => ({
   sendTyping: async () => {},
   sendResponse: async () => {},
 });
