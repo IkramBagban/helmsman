@@ -10,9 +10,10 @@ export {
   type DomainDetailsResult,
 } from "./public-domain.js";
 export type {
+  CloudflareConfig,
   DnsRecord,
-  NamecheapConfig,
-  RecordType,
   DomainAvailabilityResult,
   DomainPricingResult,
+  NamecheapConfig,
+  RecordType,
 } from "./types.js";

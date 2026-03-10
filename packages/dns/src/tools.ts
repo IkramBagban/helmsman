@@ -356,7 +356,7 @@ export const createDnsProviderPackage = (
         return {
           ok: false,
           error:
-            "Provider credentials are not configured. Set DNS_PROVIDER=namecheap and Namecheap credentials to check live pricing.",
+            "Provider credentials are not configured. Set DNS_PROVIDER to cloudflare or namecheap with matching provider credentials to check live pricing.",
         };
       }
 
@@ -377,7 +377,7 @@ export const createDnsProviderPackage = (
         return {
           ok: false,
           error:
-            "Provider credentials are not configured. Set DNS_PROVIDER=namecheap and Namecheap credentials to perform write operations.",
+            "Provider credentials are not configured. Set DNS_PROVIDER to cloudflare or namecheap with matching provider credentials to perform write operations.",
         };
       }
 
@@ -405,7 +405,7 @@ export const createDnsProviderPackage = (
         return {
           ok: false,
           error:
-            "Provider credentials are not configured. Set DNS_PROVIDER=namecheap and Namecheap credentials to perform write operations.",
+            "Provider credentials are not configured. Set DNS_PROVIDER to cloudflare or namecheap with matching provider credentials to perform write operations.",
         };
       }
 
@@ -438,7 +438,7 @@ export const createDnsProviderPackage = (
         return {
           ok: false,
           error:
-            "Provider credentials are not configured. Set DNS_PROVIDER=namecheap and Namecheap credentials to perform write operations.",
+            "Provider credentials are not configured. Set DNS_PROVIDER to cloudflare or namecheap with matching provider credentials to perform write operations.",
         };
       }
 

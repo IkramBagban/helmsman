@@ -20,7 +20,11 @@ import {
 } from "@helmsman/shared";
 import { SchedulingService, createSchedulingTools } from "@helmsman/scheduling";
 
-import { hasNamecheapDnsConfig, type ApiEnv } from "../config.js";
+import {
+  hasCloudflareDnsConfig,
+  hasNamecheapDnsConfig,
+  type ApiEnv,
+} from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -120,18 +124,27 @@ export const createTelegramWebhookHandler = async (
       awsKnowledgeMcpApiKey: env.awsKnowledgeMcpApiKey,
       awsKnowledgeMcpTimeoutMs: env.awsKnowledgeMcpTimeoutMs,
       capabilityStore,
-      dnsConfig: hasNamecheapDnsConfig(env)
+      dnsConfig: hasCloudflareDnsConfig(env)
         ? {
-            provider: "namecheap",
-            namecheap: {
-              apiUser: env.namecheapApiUser as string,
-              apiKey: env.namecheapApiKey as string,
-              username: env.namecheapUsername as string,
-              clientIp: env.namecheapClientIp as string,
-              apiBaseUrl: env.namecheapApiBaseUrl,
+            provider: "cloudflare",
+            cloudflare: {
+              apiToken: env.cloudflareApiToken as string,
+              zoneMap: env.cloudflareZoneMap,
+              apiBaseUrl: env.cloudflareApiBaseUrl,
             },
           }
-        : undefined,
+        : hasNamecheapDnsConfig(env)
+          ? {
+              provider: "namecheap",
+              namecheap: {
+                apiUser: env.namecheapApiUser as string,
+                apiKey: env.namecheapApiKey as string,
+                username: env.namecheapUsername as string,
+                clientIp: env.namecheapClientIp as string,
+                apiBaseUrl: env.namecheapApiBaseUrl,
+              },
+            }
+          : undefined,
       extraTools: schedulingTools,
     }));
 

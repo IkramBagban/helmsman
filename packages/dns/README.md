@@ -13,18 +13,26 @@ DNS provider package for Helmsman.
   - Uses Namecheap live API when configured
   - Falls back to RDAP heuristic without credentials
 - Check domain pricing via Namecheap (`dns_check_domain_pricing`)
-- Create/update/delete DNS records via Namecheap
+- Create/update/delete DNS records via Namecheap or Cloudflare
 
-## Namecheap env vars (required for write operations and live availability/pricing)
+## Provider env vars
 
+### Namecheap
+
+- `DNS_PROVIDER=namecheap`
 - `NAMECHEAP_API_USER`
 - `NAMECHEAP_API_KEY`
 - `NAMECHEAP_USERNAME`
 - `NAMECHEAP_CLIENT_IP`
+- Optional: `NAMECHEAP_API_BASE_URL` (default: sandbox)
 
-## Optional
+### Cloudflare
 
-- `NAMECHEAP_API_BASE_URL` (default: sandbox endpoint)
+- `DNS_PROVIDER=cloudflare`
+- `CLOUDFLARE_API_TOKEN`
+- Optional: `CLOUDFLARE_ZONE_MAP` JSON map of domain->zoneId
+  - Example: `{"example.com":"<zone-id>"}`
+- Optional: `CLOUDFLARE_API_BASE_URL` (default: `https://api.cloudflare.com/client/v4`)
 
 ## Credentialless behavior
 
@@ -41,4 +49,5 @@ Write tools and live registrar pricing require provider credentials.
 
 ## Record Mutation Notes
 
-For Namecheap, `setHosts` replaces the full DNS host set. The provider implementation fetches current records, applies the requested mutation by `recordId`, and submits the complete updated set.
+- Namecheap: `setHosts` replaces all host records, so the provider reads current state, applies mutation, and writes full set.
+- Cloudflare: record operations use record IDs from Cloudflare DNS API.

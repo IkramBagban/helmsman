@@ -16,12 +16,15 @@ export interface ApiEnv {
   readonly awsKnowledgeMcpApiKey?: string;
   readonly awsKnowledgeMcpTimeoutMs?: number;
   readonly scheduleDataDir: string;
-  readonly dnsProvider?: "namecheap";
+  readonly dnsProvider?: "namecheap" | "cloudflare";
   readonly namecheapApiUser?: string;
   readonly namecheapApiKey?: string;
   readonly namecheapUsername?: string;
   readonly namecheapClientIp?: string;
   readonly namecheapApiBaseUrl?: string;
+  readonly cloudflareApiToken?: string;
+  readonly cloudflareZoneMap?: Record<string, string>;
+  readonly cloudflareApiBaseUrl?: string;
 }
 
 const getRequired = (name: string): string => {
@@ -34,6 +37,45 @@ const getRequired = (name: string): string => {
   }
 
   return value;
+};
+
+const parseCloudflareZoneMap = (): Record<string, string> | undefined => {
+  const raw = process.env.CLOUDFLARE_ZONE_MAP;
+  if (!raw) {
+    return undefined;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new AppError(
+      "ENV_INVALID",
+      "CLOUDFLARE_ZONE_MAP must be valid JSON (object mapping domain to zone ID).",
+    );
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new AppError(
+      "ENV_INVALID",
+      "CLOUDFLARE_ZONE_MAP must be a JSON object mapping domain to zone ID.",
+    );
+  }
+
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  for (const [domain, zoneId] of entries) {
+    if (typeof zoneId !== "string" || zoneId.trim().length === 0) {
+      throw new AppError(
+        "ENV_INVALID",
+        "CLOUDFLARE_ZONE_MAP values must be non-empty strings.",
+        { domain },
+      );
+    }
+  }
+
+  return Object.fromEntries(
+    entries.map(([domain, zoneId]) => [domain.toLowerCase(), zoneId as string]),
+  );
 };
 
 export const getEnv = (): ApiEnv => {
@@ -75,6 +117,19 @@ export const getEnv = (): ApiEnv => {
     );
   }
 
+  const dnsProviderRaw = process.env.DNS_PROVIDER;
+  const dnsProvider =
+    dnsProviderRaw === "namecheap" || dnsProviderRaw === "cloudflare"
+      ? dnsProviderRaw
+      : undefined;
+
+  if (dnsProviderRaw && !dnsProvider) {
+    throw new AppError(
+      "ENV_INVALID",
+      "DNS_PROVIDER must be one of: namecheap, cloudflare",
+    );
+  }
+
   const env: ApiEnv = {
     port,
     nodeEnv: nodeEnvValue,
@@ -96,13 +151,15 @@ export const getEnv = (): ApiEnv => {
       ? Number(process.env.AWS_KNOWLEDGE_MCP_TIMEOUT_MS)
       : undefined,
     scheduleDataDir: process.env.SCHEDULE_DATA_DIR ?? "data",
-    dnsProvider:
-      process.env.DNS_PROVIDER === "namecheap" ? "namecheap" : undefined,
+    dnsProvider,
     namecheapApiUser: process.env.NAMECHEAP_API_USER,
     namecheapApiKey: process.env.NAMECHEAP_API_KEY,
     namecheapUsername: process.env.NAMECHEAP_USERNAME,
     namecheapClientIp: process.env.NAMECHEAP_CLIENT_IP,
     namecheapApiBaseUrl: process.env.NAMECHEAP_API_BASE_URL,
+    cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN,
+    cloudflareZoneMap: parseCloudflareZoneMap(),
+    cloudflareApiBaseUrl: process.env.CLOUDFLARE_API_BASE_URL,
   };
 
   if (
@@ -127,3 +184,6 @@ export const hasNamecheapDnsConfig = (env: ApiEnv): boolean =>
     env.namecheapUsername &&
     env.namecheapClientIp,
   );
+
+export const hasCloudflareDnsConfig = (env: ApiEnv): boolean =>
+  Boolean(env.dnsProvider === "cloudflare" && env.cloudflareApiToken);

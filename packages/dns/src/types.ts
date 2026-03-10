@@ -30,6 +30,12 @@ export interface NamecheapConfig {
   readonly apiBaseUrl?: string;
 }
 
+export interface CloudflareConfig {
+  readonly apiToken: string;
+  readonly zoneMap?: Record<string, string>;
+  readonly apiBaseUrl?: string;
+}
+
 export interface DomainAvailabilityResult {
   readonly domain: string;
   readonly available: boolean;

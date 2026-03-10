@@ -46,17 +46,26 @@ export interface HelmsmanFactoryConfig {
   readonly awsKnowledgeMcpTimeoutMs?: number;
   /** Optional capability store for activation/approval state */
   readonly capabilityStore?: CapabilityStore;
-  /** Namecheap configuration to enable DNS tools */
-  readonly dnsConfig?: {
-    readonly provider: "namecheap";
-    readonly namecheap: {
-      readonly apiUser: string;
-      readonly apiKey: string;
-      readonly username: string;
-      readonly clientIp: string;
-      readonly apiBaseUrl?: string;
-    };
-  };
+  /** DNS provider configuration to enable DNS tools */
+  readonly dnsConfig?:
+    | {
+        readonly provider: "namecheap";
+        readonly namecheap: {
+          readonly apiUser: string;
+          readonly apiKey: string;
+          readonly username: string;
+          readonly clientIp: string;
+          readonly apiBaseUrl?: string;
+        };
+      }
+    | {
+        readonly provider: "cloudflare";
+        readonly cloudflare: {
+          readonly apiToken: string;
+          readonly zoneMap?: Record<string, string>;
+          readonly apiBaseUrl?: string;
+        };
+      };
   /**
    * Additional tools to register with the agent (e.g. scheduling tools).
    * These are merged into the tool set alongside built-in tools.
