@@ -45,6 +45,44 @@ Before production-grade rollout, several operational and verification details sh
    - Move to a mechanism that avoids host secret file mounts entirely (direct in-container write from orchestrator stream, short-lived secret sidecar, or equivalent sealed injection).
    - Add explicit verification that no secret material is exposed via `docker inspect`, host fs scans, or audit payloads.
 
+7. **Truthful execution status (no hallucinated progress updates)**
+    - Current behavior can produce status text like "retrying now" or "still working" without a real active execution handle.
+    - User trust risk: conversational turns can imply background work that is not actually running.
+    - Implement a state-backed execution status model:
+       - Persist operation state per chat (`idle`, `queued`, `running`, `blocked`, `failed`, `completed`) with `operationId`.
+       - Update state only from actual orchestrator/tool events (not generated prose).
+       - Add a dedicated status responder path that reads state and refuses to fabricate progress.
+    - Add response invariants:
+       - Never claim "running/retrying/in progress" unless there is a live operation state.
+       - If no active operation exists, answer explicitly: no active run and what is needed next.
+    - Add regression tests for acknowledgement turns (`ok`, `sure`, `go ahead`) after failures so they cannot emit fake progress.
+
+8. **Unified control-plane architecture for all agent features**
+    - Current risk: behavior rules are spread across prompts, routing, and handlers instead of enforced in one architecture.
+   - Reference design: `docs/UNIFIED_CONTROL_PLANE_ARCHITECTURE.md`.
+    - Target model: every feature follows the same pipeline:
+       - intent classification
+       - deterministic planning / action extraction
+       - deterministic policy and approval check
+       - execution gate
+       - audit event emission
+       - response composition
+    - The LLM may propose or explain actions, but it must never be the authority that permits execution.
+    - Approval must be mandatory, structural, and non-bypassable for sensitive/destructive commands:
+       - execution requires a valid approval artifact linked to user, chat, command, risk tier, and expiry
+       - users cannot bypass approval with phrasing tricks, repeated confirmations, or prompt injection
+       - the model cannot self-authorize, downgrade risk, or skip the policy gate
+    - Add hard execution invariants:
+       - no sensitive command runs without policy-engine approval
+       - no command runs directly from free-form model text
+       - every executed action must have traceable lineage: request -> plan -> approval -> execution -> audit log
+    - Recommended implementation approach:
+       - centralize all write/destructive execution through one execution gateway in code
+       - make the policy engine pure/deterministic and separate from prompts
+       - require typed action objects instead of free-text command execution where possible
+       - make approval verification database/state based, never model judged
+       - add invariant tests and adversarial tests for bypass attempts
+
 ---
 
 ### P1 (Should Address Early)
@@ -111,10 +149,14 @@ Before production-grade rollout, several operational and verification details sh
 
 5. **ARCHITECTURE.md**
    - Add queue/worker path for webhook decoupling under load.
+   - Add unified control-plane diagram showing routing, policy, approvals, execution gate, audit, and response composition.
 
 6. **GIT_SSH_DEVOPS_RUNTIME.md**
    - Add final production target for secret delivery (no host bind-mounted secret files).
    - Add a validation checklist proving secret non-exposure across logs, inspect output, and crash diagnostics.
+
+7. **TRUST_AND_PERMISSIONS.md / AGENT_CORE.md / TOOL_SYSTEM.md**
+   - Refactor these docs around one shared execution-control architecture instead of feature-specific approval logic.
 
 ---
 
@@ -131,6 +173,9 @@ All gates should be green before production launch:
 - [ ] Data retention + deletion policy approved and implemented
 - [ ] On-call runbooks published and tested via game day
 - [ ] Runtime secrets hardening verified (no host secret bind mounts in production path)
+- [ ] Status truthfulness verified (no fabricated in-progress/retry claims without active operation state)
+- [ ] Sensitive actions are impossible to execute without a valid approval artifact enforced in code
+- [ ] Prompt injection and phrasing attacks cannot bypass approval or execution gates
 
 ---
 
@@ -148,3 +193,8 @@ All gates should be green before production launch:
 
 This is a living backlog. 
 When a point is implemented, link the PR/commit and mark it complete here.
+
+Related design drafts:
+- `docs/UNIFIED_CONTROL_PLANE_ARCHITECTURE.md`
+- `docs/DNS_DOMAIN_PLATFORM_ARCHITECTURE.md`
+- `docs/OPENCLAW_LESSONS_FOR_HELMSMAN.md`
