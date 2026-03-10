@@ -17,8 +17,12 @@ import { createAwsKnowledgeTool } from "./tools/aws-knowledge.js";
 import { createMastraGitHubTools } from "./tools/github-tools.js";
 import { createMastraDevopsTools } from "./tools/devops-tools.js";
 import { createAwsProvider } from "@helmsman/tools-aws";
+import { createDnsProviderPackage } from "@helmsman/dns";
 import { HelmsmanOrchestrator } from "./orchestrator.js";
-import { InMemoryCapabilityStore, type CapabilityStore } from "./capability-store.js";
+import {
+  InMemoryCapabilityStore,
+  type CapabilityStore,
+} from "./capability-store.js";
 import { createRequestActionTool } from "@helmsman/action-gateway";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +46,26 @@ export interface HelmsmanFactoryConfig {
   readonly awsKnowledgeMcpTimeoutMs?: number;
   /** Optional capability store for activation/approval state */
   readonly capabilityStore?: CapabilityStore;
+  /** DNS provider configuration to enable DNS tools */
+  readonly dnsConfig?:
+    | {
+        readonly provider: "namecheap";
+        readonly namecheap: {
+          readonly apiUser: string;
+          readonly apiKey: string;
+          readonly username: string;
+          readonly clientIp: string;
+          readonly apiBaseUrl?: string;
+        };
+      }
+    | {
+        readonly provider: "cloudflare";
+        readonly cloudflare: {
+          readonly apiToken: string;
+          readonly zoneMap?: Record<string, string>;
+          readonly apiBaseUrl?: string;
+        };
+      };
   /**
    * Additional tools to register with the agent (e.g. scheduling tools).
    * These are merged into the tool set alongside built-in tools.
@@ -64,7 +88,8 @@ export async function createHelmsman(
   config?: HelmsmanFactoryConfig,
 ): Promise<HelmsmanOrchestrator> {
   const model = config?.model ?? "google/gemini-2.0-flash";
-  const capabilityStore = config?.capabilityStore ?? new InMemoryCapabilityStore();
+  const capabilityStore =
+    config?.capabilityStore ?? new InMemoryCapabilityStore();
 
   // ── Assemble tools ────────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Mastra tool types are covariant; safe to widen here
@@ -74,12 +99,27 @@ export async function createHelmsman(
   };
 
   const awsProvider = createAwsProvider(tools.request_action);
-  const extractId = (t: any) => t.id || t.name || Math.random().toString(36).substring(7);
+  const extractId = (t: any) =>
+    t.id || t.name || Math.random().toString(36).substring(7);
   Object.assign(
     tools,
-    Object.fromEntries(awsProvider.observerTools.map(t => [extractId(t), t])),
-    Object.fromEntries(awsProvider.operatorTools.map(t => [extractId(t), t])),
-    Object.fromEntries(awsProvider.commanderTools.map(t => [extractId(t), t]))
+    Object.fromEntries(awsProvider.observerTools.map((t) => [extractId(t), t])),
+    Object.fromEntries(awsProvider.operatorTools.map((t) => [extractId(t), t])),
+    Object.fromEntries(
+      awsProvider.commanderTools.map((t) => [extractId(t), t]),
+    ),
+  );
+
+  const dnsProvider = createDnsProviderPackage({
+    providerConfig: config?.dnsConfig,
+  });
+  Object.assign(
+    tools,
+    Object.fromEntries(dnsProvider.observerTools.map((t) => [extractId(t), t])),
+    Object.fromEntries(dnsProvider.operatorTools.map((t) => [extractId(t), t])),
+    Object.fromEntries(
+      dnsProvider.commanderTools.map((t) => [extractId(t), t]),
+    ),
   );
 
   if (config?.awsKnowledgeMcpUrl) {
