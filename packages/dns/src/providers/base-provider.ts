@@ -1,8 +1,23 @@
-import type { DnsRecord } from "../types.js";
+import type {
+  DnsRecord,
+  DomainAvailabilityResult,
+  DomainPricingResult,
+} from "../types.js";
 
 export interface DnsProvider {
   listRecords(domain: string): Promise<readonly DnsRecord[]>;
-  createRecord(domain: string, record: DnsRecord): Promise<readonly DnsRecord[]>;
-  updateRecord(domain: string, record: DnsRecord): Promise<readonly DnsRecord[]>;
-  deleteRecord(domain: string, target: Pick<DnsRecord, "host" | "type">): Promise<readonly DnsRecord[]>;
+  getRecord(domain: string, recordId: string): Promise<DnsRecord>;
+  createRecord(
+    domain: string,
+    record: Omit<DnsRecord, "id">,
+  ): Promise<DnsRecord>;
+  updateRecord(
+    domain: string,
+    recordId: string,
+    patch: Partial<Omit<DnsRecord, "id">>,
+  ): Promise<DnsRecord>;
+  deleteRecord(domain: string, recordId: string): Promise<void>;
+
+  checkDomainAvailability?(domain: string): Promise<DomainAvailabilityResult>;
+  getDomainPricing?(tld: string): Promise<DomainPricingResult>;
 }

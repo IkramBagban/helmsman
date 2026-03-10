@@ -7,7 +7,7 @@ import {
   resolveTxt,
 } from "node:dns/promises";
 import { toAbsoluteHost } from "./utils.js";
-import type { DnsRecord } from "./types.js";
+import type { DnsRecord, RecordType } from "./types.js";
 
 export interface PublicDnsInspection {
   readonly fqdn: string;
@@ -39,6 +39,20 @@ const safeResolve = async <T>(
   }
 };
 
+const toRecord = (
+  host: string,
+  type: RecordType,
+  value: string,
+  ttl: number,
+  mxPref?: number,
+): DnsRecord => ({
+  host,
+  type,
+  value,
+  ttl,
+  mxPref,
+});
+
 export const inspectPublicDns = async (
   domain: string,
   host: string,
@@ -57,22 +71,13 @@ export const inspectPublicDns = async (
   ]);
 
   const records: DnsRecord[] = [
-    ...a.map((value) => ({ host, type: "A", value, ttl: 300 })),
-    ...aaaa.map((value) => ({ host, type: "AAAA", value, ttl: 300 })),
-    ...cname.map((value) => ({ host, type: "CNAME", value, ttl: 300 })),
-    ...mxRaw.map((value) => ({
-      host,
-      type: "MX",
-      value: value.exchange,
-      ttl: 300,
-      mxPref: value.priority,
-    })),
-    ...txtRaw.map((value) => ({
-      host,
-      type: "TXT",
-      value: value.join(""),
-      ttl: 300,
-    })),
+    ...a.map((value) => toRecord(host, "A", value, 300)),
+    ...aaaa.map((value) => toRecord(host, "AAAA", value, 300)),
+    ...cname.map((value) => toRecord(host, "CNAME", value, 300)),
+    ...mxRaw.map((value) =>
+      toRecord(host, "MX", value.exchange, 300, value.priority),
+    ),
+    ...txtRaw.map((value) => toRecord(host, "TXT", value.join(""), 300)),
   ];
 
   return { fqdn, records };

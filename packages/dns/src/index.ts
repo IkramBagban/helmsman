@@ -6,7 +6,13 @@ export {
 export {
   checkDomainAvailability,
   getDomainDetails,
-  type DomainAvailabilityResult,
+  type DomainAvailabilityResult as PublicDomainAvailabilityResult,
   type DomainDetailsResult,
 } from "./public-domain.js";
-export type { DnsRecord, NamecheapConfig } from "./types.js";
+export type {
+  DnsRecord,
+  NamecheapConfig,
+  RecordType,
+  DomainAvailabilityResult,
+  DomainPricingResult,
+} from "./types.js";
