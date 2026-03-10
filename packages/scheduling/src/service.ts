@@ -1,6 +1,6 @@
 import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
 
-import type { TelegramMessageSender } from "../routes/telegram.js";
+import type { ScheduleMessageSender } from "./sender.js";
 import { SchedulerEngine } from "./engine.js";
 import { classifyScheduleRisk, requiresApprovalForSchedule } from "./risk.js";
 import { JsonScheduleRepository } from "./store.js";
@@ -94,7 +94,7 @@ export interface ManageScheduleResult {
 
 export interface SchedulingServiceConfig {
   readonly dataDir: string;
-  readonly sender: TelegramMessageSender;
+  readonly sender: ScheduleMessageSender;
   readonly orchestrator: HelmsmanOrchestrator;
   readonly draftTtlMinutes?: number;
   readonly runRetention?: number;

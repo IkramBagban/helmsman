@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 import type { HelmsmanOrchestrator } from "@helmsman/agent-core";
 import type { NormalizedMessage } from "@helmsman/shared";
 
-import type { TelegramMessageSender } from "../routes/telegram.js";
+import type { ScheduleMessageSender } from "./sender.js";
 import { JsonScheduleRepository } from "./store.js";
 import type { ScheduleRecord, ScheduleRunRecord } from "./types.js";
 
@@ -227,13 +227,13 @@ const validateHttpPingTarget = async (rawUrl: string): Promise<{ safe: true; url
 
 export interface SchedulerEngineConfig {
   readonly repository: JsonScheduleRepository;
-  readonly sender: TelegramMessageSender;
+  readonly sender: ScheduleMessageSender;
   readonly orchestrator: HelmsmanOrchestrator;
 }
 
 export class SchedulerEngine {
   private readonly repository: JsonScheduleRepository;
-  private readonly sender: TelegramMessageSender;
+  private readonly sender: ScheduleMessageSender;
   private readonly orchestrator: HelmsmanOrchestrator;
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
 
