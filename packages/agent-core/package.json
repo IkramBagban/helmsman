@@ -20,6 +20,7 @@
     "@ai-sdk/google": "^3.0.34",
     "@helmsman/action-gateway": "workspace:*",
     "@helmsman/audit": "workspace:*",
+    "@helmsman/dns": "workspace:*",
     "@helmsman/policy": "workspace:*",
     "@helmsman/shared": "*",
     "@helmsman/tools": "workspace:*",

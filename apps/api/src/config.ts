@@ -16,12 +16,21 @@ export interface ApiEnv {
   readonly awsKnowledgeMcpApiKey?: string;
   readonly awsKnowledgeMcpTimeoutMs?: number;
   readonly scheduleDataDir: string;
+  readonly dnsProvider?: "namecheap";
+  readonly namecheapApiUser?: string;
+  readonly namecheapApiKey?: string;
+  readonly namecheapUsername?: string;
+  readonly namecheapClientIp?: string;
+  readonly namecheapApiBaseUrl?: string;
 }
 
 const getRequired = (name: string): string => {
   const value = process.env[name];
   if (!value) {
-    throw new AppError("ENV_MISSING", `Missing required environment variable: ${name}`);
+    throw new AppError(
+      "ENV_MISSING",
+      `Missing required environment variable: ${name}`,
+    );
   }
 
   return value;
@@ -29,13 +38,28 @@ const getRequired = (name: string): string => {
 
 export const getEnv = (): ApiEnv => {
   const providerValue = process.env.LLM_PROVIDER ?? "gemini";
-  if (providerValue !== "openai" && providerValue !== "gemini" && providerValue !== "echo" && providerValue !== "anthropic") {
-    throw new AppError("ENV_INVALID", "LLM_PROVIDER must be one of: gemini, openai, echo, anthropic");
+  if (
+    providerValue !== "openai" &&
+    providerValue !== "gemini" &&
+    providerValue !== "echo" &&
+    providerValue !== "anthropic"
+  ) {
+    throw new AppError(
+      "ENV_INVALID",
+      "LLM_PROVIDER must be one of: gemini, openai, echo, anthropic",
+    );
   }
 
   const nodeEnvValue = process.env.NODE_ENV ?? "development";
-  if (nodeEnvValue !== "development" && nodeEnvValue !== "production" && nodeEnvValue !== "test") {
-    throw new AppError("ENV_INVALID", "NODE_ENV must be development, production, or test");
+  if (
+    nodeEnvValue !== "development" &&
+    nodeEnvValue !== "production" &&
+    nodeEnvValue !== "test"
+  ) {
+    throw new AppError(
+      "ENV_INVALID",
+      "NODE_ENV must be development, production, or test",
+    );
   }
 
   const port = Number(process.env.PORT ?? "3500");
@@ -45,7 +69,10 @@ export const getEnv = (): ApiEnv => {
 
   const telegramWebhookSecret = getRequired("TELEGRAM_WEBHOOK_SECRET");
   if (telegramWebhookSecret.length < 16) {
-    throw new AppError("ENV_INVALID", "TELEGRAM_WEBHOOK_SECRET must be at least 16 characters");
+    throw new AppError(
+      "ENV_INVALID",
+      "TELEGRAM_WEBHOOK_SECRET must be at least 16 characters",
+    );
   }
 
   const env: ApiEnv = {
@@ -57,9 +84,9 @@ export const getEnv = (): ApiEnv => {
     openAiApiKey: process.env.OPENAI_API_KEY,
     openAiBaseUrl: process.env.OPENAI_BASE_URL,
     geminiApiKey:
-      process.env.GEMINI_API_KEY
-      ?? process.env.GOOGLE_API_KEY
-      ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+      process.env.GEMINI_API_KEY ??
+      process.env.GOOGLE_API_KEY ??
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY,
     geminiBaseUrl: process.env.GEMINI_BASE_URL,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY,
     redisUrl: process.env.REDIS_URL,
@@ -69,11 +96,34 @@ export const getEnv = (): ApiEnv => {
       ? Number(process.env.AWS_KNOWLEDGE_MCP_TIMEOUT_MS)
       : undefined,
     scheduleDataDir: process.env.SCHEDULE_DATA_DIR ?? "data",
+    dnsProvider:
+      process.env.DNS_PROVIDER === "namecheap" ? "namecheap" : undefined,
+    namecheapApiUser: process.env.NAMECHEAP_API_USER,
+    namecheapApiKey: process.env.NAMECHEAP_API_KEY,
+    namecheapUsername: process.env.NAMECHEAP_USERNAME,
+    namecheapClientIp: process.env.NAMECHEAP_CLIENT_IP,
+    namecheapApiBaseUrl: process.env.NAMECHEAP_API_BASE_URL,
   };
 
-  if (env.awsKnowledgeMcpTimeoutMs !== undefined && (Number.isNaN(env.awsKnowledgeMcpTimeoutMs) || env.awsKnowledgeMcpTimeoutMs < 1000)) {
-    throw new AppError("ENV_INVALID", "AWS_KNOWLEDGE_MCP_TIMEOUT_MS must be a number >= 1000");
+  if (
+    env.awsKnowledgeMcpTimeoutMs !== undefined &&
+    (Number.isNaN(env.awsKnowledgeMcpTimeoutMs) ||
+      env.awsKnowledgeMcpTimeoutMs < 1000)
+  ) {
+    throw new AppError(
+      "ENV_INVALID",
+      "AWS_KNOWLEDGE_MCP_TIMEOUT_MS must be a number >= 1000",
+    );
   }
 
   return env;
 };
+
+export const hasNamecheapDnsConfig = (env: ApiEnv): boolean =>
+  Boolean(
+    env.dnsProvider === "namecheap" &&
+    env.namecheapApiUser &&
+    env.namecheapApiKey &&
+    env.namecheapUsername &&
+    env.namecheapClientIp,
+  );

@@ -13,11 +13,14 @@ import {
   TelegramSender,
   type DedupStore,
 } from "@helmsman/transport";
-import { isTelegramUpdate, type AgentResponse, type NormalizedMessage } from "@helmsman/shared";
+import {
+  isTelegramUpdate,
+  type AgentResponse,
+  type NormalizedMessage,
+} from "@helmsman/shared";
 import { SchedulingService, createSchedulingTools } from "@helmsman/scheduling";
 
-import type { ApiEnv } from "../config.js";
-
+import { hasNamecheapDnsConfig, type ApiEnv } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -58,11 +61,15 @@ export const createTelegramWebhookHandler = async (
   dependencies?: TelegramWebhookDependencies,
 ): Promise<TelegramWebhookHandler> => {
   if (!dependencies?.dedupStore) {
-    throw new Error("Telegram dedupStore is required but was not provided in dependencies.");
+    throw new Error(
+      "Telegram dedupStore is required but was not provided in dependencies.",
+    );
   }
   const dedupStore = dependencies.dedupStore;
-  const sender = dependencies?.sender ?? new TelegramSender(env.telegramBotToken);
-  const capabilityStore = dependencies?.capabilityStore ?? new InMemoryCapabilityStore();
+  const sender =
+    dependencies?.sender ?? new TelegramSender(env.telegramBotToken);
+  const capabilityStore =
+    dependencies?.capabilityStore ?? new InMemoryCapabilityStore();
 
   // ── Bootstrap scheduling service ────────────────────────────────────────
   // We need a temporary orchestrator reference for the scheduling engine's
@@ -72,21 +79,23 @@ export const createTelegramWebhookHandler = async (
   let resolvedOrchestrator: HelmsmanOrchestrator;
 
   // Create scheduling service first (needs orchestrator for engine execution)
-  const schedulingService = dependencies?.schedulingService ?? new SchedulingService({
-    dataDir: env.scheduleDataDir,
-    sender,
-    // The orchestrator is set via a lazy proxy — it gets resolved after
-    // createHelmsman returns. This handles the circular dependency:
-    // scheduling tools → service, service engine → orchestrator, orchestrator → tools.
-    orchestrator: new Proxy({} as HelmsmanOrchestrator, {
-      get(_target, prop, receiver) {
-        if (!resolvedOrchestrator) {
-          throw new Error("Orchestrator not yet initialized");
-        }
-        return Reflect.get(resolvedOrchestrator, prop, receiver);
-      },
-    }),
-  });
+  const schedulingService =
+    dependencies?.schedulingService ??
+    new SchedulingService({
+      dataDir: env.scheduleDataDir,
+      sender,
+      // The orchestrator is set via a lazy proxy — it gets resolved after
+      // createHelmsman returns. This handles the circular dependency:
+      // scheduling tools → service, service engine → orchestrator, orchestrator → tools.
+      orchestrator: new Proxy({} as HelmsmanOrchestrator, {
+        get(_target, prop, receiver) {
+          if (!resolvedOrchestrator) {
+            throw new Error("Orchestrator not yet initialized");
+          }
+          return Reflect.get(resolvedOrchestrator, prop, receiver);
+        },
+      }),
+    });
 
   // Create scheduling Mastra tools that delegate to the service
   const schedulingTools = createSchedulingTools({ schedulingService });
@@ -111,6 +120,18 @@ export const createTelegramWebhookHandler = async (
       awsKnowledgeMcpApiKey: env.awsKnowledgeMcpApiKey,
       awsKnowledgeMcpTimeoutMs: env.awsKnowledgeMcpTimeoutMs,
       capabilityStore,
+      dnsConfig: hasNamecheapDnsConfig(env)
+        ? {
+            provider: "namecheap",
+            namecheap: {
+              apiUser: env.namecheapApiUser as string,
+              apiKey: env.namecheapApiKey as string,
+              username: env.namecheapUsername as string,
+              clientIp: env.namecheapClientIp as string,
+              apiBaseUrl: env.namecheapApiBaseUrl,
+            },
+          }
+        : undefined,
       extraTools: schedulingTools,
     }));
 
@@ -127,7 +148,9 @@ export const createTelegramWebhookHandler = async (
     async handle(request: Request): Promise<Response> {
       try {
         // ── Auth ─────────────────────────────────────────────────────────
-        const secretHeader = request.headers.get("x-telegram-bot-api-secret-token");
+        const secretHeader = request.headers.get(
+          "x-telegram-bot-api-secret-token",
+        );
         if (secretHeader !== env.telegramWebhookSecret) {
           console.warn("Rejected Telegram request with invalid secret");
           return Response.json({ ok: true });
@@ -144,7 +167,8 @@ export const createTelegramWebhookHandler = async (
           return Response.json({ ok: true, duplicate: true });
         }
 
-        const correlationId = request.headers.get("x-correlation-id") ?? randomUUID();
+        const correlationId =
+          request.headers.get("x-correlation-id") ?? randomUUID();
 
         if (!body.message?.text) {
           return Response.json({ ok: true });
@@ -171,13 +195,30 @@ export const createTelegramWebhookHandler = async (
           userId,
           chatId,
           handleActivation: async (role, activationId, runUserId, runChatId) =>
-            await resolvedOrchestrator.handleActivation(role, activationId, runUserId, runChatId),
+            await resolvedOrchestrator.handleActivation(
+              role,
+              activationId,
+              runUserId,
+              runChatId,
+            ),
           handleApprovalByCode: async (approvalId, runUserId, runChatId) =>
-            await resolvedOrchestrator.handleApproval(approvalId, runUserId, runChatId),
+            await resolvedOrchestrator.handleApproval(
+              approvalId,
+              runUserId,
+              runChatId,
+            ),
           handleConfirmationByTarget: async (target, runUserId, runChatId) =>
-            await resolvedOrchestrator.handleConfirmation(target, runUserId, runChatId),
+            await resolvedOrchestrator.handleConfirmation(
+              target,
+              runUserId,
+              runChatId,
+            ),
           handleScheduleApproval: async (approvalId, runUserId, runChatId) =>
-            await schedulingService.handleApproval(approvalId, runUserId, runChatId),
+            await schedulingService.handleApproval(
+              approvalId,
+              runUserId,
+              runChatId,
+            ),
         });
 
         if (interceptResult.handled) {
@@ -198,7 +239,8 @@ export const createTelegramWebhookHandler = async (
         }, 4000);
 
         try {
-          const agentResponse = await resolvedOrchestrator.handleMessage(normalizedMessage);
+          const agentResponse =
+            await resolvedOrchestrator.handleMessage(normalizedMessage);
           await sender.sendResponse(chatId, agentResponse.text);
         } finally {
           clearInterval(typingTimer);
