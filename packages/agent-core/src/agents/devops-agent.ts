@@ -10,11 +10,12 @@
  */
 
 import { Agent } from "@mastra/core/agent";
+import { getAgentSoul, getAgentSoulPath } from "../agent/soul.js";
 // ---------------------------------------------------------------------------
 // System instructions for the DevOps agent
 // ---------------------------------------------------------------------------
 
-const DEVOPS_AGENT_INSTRUCTIONS = `You are Helmsman — a senior DevOps engineer that lives inside chat.
+const DEVOPS_AGENT_INSTRUCTIONS_BASE = `You are Helmsman — a senior DevOps engineer that lives inside chat.
 You're sharp, concise, and helpful. You talk like a real teammate, not a customer-support chatbot.
 
 ## Who you are
@@ -169,6 +170,16 @@ You know the entire AWS CLI surface. Common patterns:
 - Cost: Spot for stateless, Reserved for steady-state, Savings Plans for compute
 - General: everything in a VPC, tight security groups, secrets in Parameter Store`;
 
+const AGENT_SOUL = getAgentSoul();
+const AGENT_SOUL_PATH = getAgentSoulPath();
+
+const DEVOPS_AGENT_INSTRUCTIONS = [
+  AGENT_SOUL ? `## Agent Soul\n${AGENT_SOUL}` : "",
+  DEVOPS_AGENT_INSTRUCTIONS_BASE,
+]
+  .filter(Boolean)
+  .join("\n\n");
+
 // ---------------------------------------------------------------------------
 // Agent factory
 // ---------------------------------------------------------------------------
@@ -190,6 +201,12 @@ export interface DevOpsAgentConfig {
 export function createDevOpsAgent(config: DevOpsAgentConfig): Agent {
   const model = config.model ?? "google/gemini-2.0-flash";
 
+  console.log("soul:", AGENT_SOUL);
+  if (AGENT_SOUL_PATH) {
+    console.log("[HelmsmanAgent] SOUL PATH:", AGENT_SOUL_PATH);
+  }
+  console.log("[HelmsmanAgent] SYSTEM PROMPT:\n", DEVOPS_AGENT_INSTRUCTIONS);
+
   return new Agent({
     id: "helmsman-devops",
     name: "Helmsman",
@@ -200,3 +217,8 @@ export function createDevOpsAgent(config: DevOpsAgentConfig): Agent {
 }
 
 export { DEVOPS_AGENT_INSTRUCTIONS };
+
+
+
+
+

@@ -145,9 +145,18 @@ User: "Hey"
  * Includes core identity, tool descriptions, best practices, and few-shot examples.
  */
 export function buildSystemPrompt(toolDefinitionsJson: string): string {
+  // Import getAgentSoul dynamically to avoid circular dependency
+  let soul = "";
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    soul = require("./agent-service").getAgentSoul();
+  } catch {}
   return [
+    console.log('soul:', soul),
+    soul ? `## Agent Soul\n${soul}` : "",
     HELMSMAN_SYSTEM_PROMPT,
     `## Available Tools\n${toolDefinitionsJson}`,
     FEW_SHOT_EXAMPLES,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
+

@@ -8,15 +8,38 @@ import {
 import { ShellExecuteTool, type ToolRegistry } from "@helmsman/tools";
 
 import { LLMMessage, LLMProvider } from "../llm/provider.js";
-import { ConversationMemoryStore, InMemoryConversationMemoryStore } from "./conversation-memory.js";
+import {
+  ConversationMemoryStore,
+  InMemoryConversationMemoryStore,
+} from "./conversation-memory.js";
 import { buildSystemPrompt } from "./system-prompt.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+// Load SOUL.md at agent startup
+const SOUL_MD_PATH = join(process.cwd(), "SOUL.md");
+let SOUL_MD_CONTENT = "";
+try {
+  SOUL_MD_CONTENT = readFileSync(SOUL_MD_PATH, "utf8");
+} catch (err) {
+  SOUL_MD_CONTENT = "";
+}
+
+// Removed noisy SOUL_MD_CONTENT log
+/** Returns the parsed SOUL.md content for agent identity and values */
+export function getAgentSoul(): string {
+  return SOUL_MD_CONTENT;
+}
 
 export interface AgentService {
   handleMessage(message: NormalizedMessage): Promise<AgentResponse>;
 }
 
 export interface PolicyEngine {
-  evaluate(request: ToolExecutionRequest, riskTier: RiskTier): Promise<PolicyDecision>;
+  evaluate(
+    request: ToolExecutionRequest,
+    riskTier: RiskTier,
+  ): Promise<PolicyDecision>;
 }
 
 export interface AuditService {
@@ -28,18 +51,23 @@ interface ParsedToolCall {
   readonly parameters: Record<string, unknown>;
 }
 
-const AMBIGUOUS_CONFIRMATION_PATTERN = /^(yes|y|ok|okay|sure|go ahead|proceed|do it)$/i;
+const AMBIGUOUS_CONFIRMATION_PATTERN =
+  /^(yes|y|ok|okay|sure|go ahead|proceed|do it)$/i;
 
 const isAmbiguousConfirmation = (text: string): boolean => {
   return AMBIGUOUS_CONFIRMATION_PATTERN.test(text.trim());
 };
 
-const TOOL_ARTIFACT_PATTERN = /("type"\s*:\s*"tool_call"|"toolName"\s*:\s*"shell\.execute"|```(?:json|tool_code)?)/i;
+const TOOL_ARTIFACT_PATTERN =
+  /("type"\s*:\s*"tool_call"|"toolName"\s*:\s*"shell\.execute"|```(?:json|tool_code)?)/i;
 
 const sanitizeForUser = (text: string): string => {
   const withoutArtifacts = text
     // Strip fenced tool-call blocks
-    .replace(/```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi, "")
+    .replace(
+      /```(?:json|tool_code)?\s*\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}\s*```/gi,
+      "",
+    )
     // Strip inline tool-call JSON
     .replace(/\{[\s\S]*?"type"\s*:\s*"tool_call"[\s\S]*?\}/gi, "")
     // Strip "Tool shell.execute ..." boilerplate
@@ -57,14 +85,18 @@ const sanitizeForUser = (text: string): string => {
   return withoutArtifacts;
 };
 
-const didAssistantAskToProceed = (conversationHistory: readonly LLMMessage[]): boolean => {
+const didAssistantAskToProceed = (
+  conversationHistory: readonly LLMMessage[],
+): boolean => {
   for (let index = conversationHistory.length - 1; index >= 0; index -= 1) {
     const message = conversationHistory[index];
     if (message?.role !== "assistant") {
       continue;
     }
 
-    return /do you want me to proceed|want me to proceed|should i proceed|shall i proceed/i.test(message.content);
+    return /do you want me to proceed|want me to proceed|should i proceed|shall i proceed/i.test(
+      message.content,
+    );
   }
 
   return false;
@@ -85,7 +117,10 @@ const MAX_TOOL_ITERATIONS = 5;
 const MAX_TOOL_OUTPUT_FOR_LLM = 12_000;
 
 /** Truncate large tool output so it doesn't overwhelm the LLM context window. */
-const truncateForLLM = (output: string, max: number = MAX_TOOL_OUTPUT_FOR_LLM): string => {
+const truncateForLLM = (
+  output: string,
+  max: number = MAX_TOOL_OUTPUT_FOR_LLM,
+): string => {
   if (output.length <= max) {
     return output;
   }
@@ -98,22 +133,45 @@ const summarizeRawOutputFallback = (output: string): string => {
     const parsed = JSON.parse(output) as unknown;
 
     if (typeof parsed === "object" && parsed !== null && "Buckets" in parsed) {
-      const buckets = (parsed as { Buckets?: Array<{ Name?: string; CreationDate?: string }> }).Buckets ?? [];
+      const buckets =
+        (
+          parsed as {
+            Buckets?: Array<{ Name?: string; CreationDate?: string }>;
+          }
+        ).Buckets ?? [];
       const preview = buckets
         .slice(0, 12)
-        .map((bucket, index) => `${index + 1}. ${bucket.Name ?? "unknown"}${bucket.CreationDate ? ` (${bucket.CreationDate.slice(0, 10)})` : ""}`)
+        .map(
+          (bucket, index) =>
+            `${index + 1}. ${bucket.Name ?? "unknown"}${bucket.CreationDate ? ` (${bucket.CreationDate.slice(0, 10)})` : ""}`,
+        )
         .join("\n");
       return [
         `You've got ${buckets.length} S3 bucket${buckets.length === 1 ? "" : "s"}.`,
         preview ? `Here they are:\n${preview}` : "",
         buckets.length > 12 ? `…plus ${buckets.length - 12} more.` : "",
-      ].filter(Boolean).join("\n\n");
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     }
 
-    if (typeof parsed === "object" && parsed !== null && "DistributionList" in parsed) {
-      const items = (parsed as {
-        DistributionList?: { Items?: Array<{ Id?: string; DomainName?: string; Aliases?: { Quantity?: number } }> };
-      }).DistributionList?.Items ?? [];
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "DistributionList" in parsed
+    ) {
+      const items =
+        (
+          parsed as {
+            DistributionList?: {
+              Items?: Array<{
+                Id?: string;
+                DomainName?: string;
+                Aliases?: { Quantity?: number };
+              }>;
+            };
+          }
+        ).DistributionList?.Items ?? [];
 
       const preview = items
         .slice(0, 10)
@@ -127,20 +185,27 @@ const summarizeRawOutputFallback = (output: string): string => {
         `${items.length} CloudFront distribution${items.length === 1 ? "" : "s"}:`,
         preview || "",
         items.length > 10 ? `…plus ${items.length - 10} more.` : "",
-      ].filter(Boolean).join("\n\n");
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     }
 
     if (Array.isArray(parsed)) {
       const preview = parsed
         .slice(0, 10)
-        .map((item, index) => `${index + 1}. ${shorten(JSON.stringify(item), 160)}`)
+        .map(
+          (item, index) =>
+            `${index + 1}. ${shorten(JSON.stringify(item), 160)}`,
+        )
         .join("\n");
 
       return [
         `${parsed.length} result${parsed.length === 1 ? "" : "s"}:`,
         preview || "",
         parsed.length > 10 ? `…plus ${parsed.length - 10} more.` : "",
-      ].filter(Boolean).join("\n\n");
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     }
   } catch {
     // fall through to plain-text fallback
@@ -166,7 +231,9 @@ const summarizeToolError = (errorText: string): string => {
 };
 
 const isAwsInvalidChoiceError = (errorText: string): boolean => {
-  return /aws:\s*error:\s*argument\s+operation:\s*Invalid choice/i.test(errorText);
+  return /aws:\s*error:\s*argument\s+operation:\s*Invalid choice/i.test(
+    errorText,
+  );
 };
 
 const isCommandSubstitutionBlockedError = (errorText: string): boolean => {
@@ -177,14 +244,20 @@ const formatIsoDate = (date: Date): string => {
   return date.toISOString().slice(0, 10);
 };
 
-const rewriteCostExplorerDateSubstitutions = (command: string): string | null => {
+const rewriteCostExplorerDateSubstitutions = (
+  command: string,
+): string | null => {
   if (!/\baws\s+ce\s+get-cost-and-usage\b/i.test(command)) {
     return null;
   }
 
   const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
 
   const startDate = formatIsoDate(monthStart);
   const endDate = formatIsoDate(today);
@@ -236,10 +309,14 @@ const tryParseToolCall = (text: string): ParsedToolCall | null => {
   const candidates: string[] = [trimmed];
 
   if (trimmed.startsWith("```")) {
-    candidates.push(trimmed.replace(/^```(?:[a-zA-Z_-]+)?\s*/i, "").replace(/\s*```$/, ""));
+    candidates.push(
+      trimmed.replace(/^```(?:[a-zA-Z_-]+)?\s*/i, "").replace(/\s*```$/, ""),
+    );
   }
 
-  const fencedBlockMatch = trimmed.match(/```(?:[a-zA-Z_-]+)?\s*([\s\S]*?)\s*```/);
+  const fencedBlockMatch = trimmed.match(
+    /```(?:[a-zA-Z_-]+)?\s*([\s\S]*?)\s*```/,
+  );
   if (fencedBlockMatch?.[1]) {
     candidates.push(fencedBlockMatch[1]);
   }
@@ -278,7 +355,7 @@ export class HelmsmanAgentService implements AgentService {
   private readonly toolRegistry?: ToolRegistry;
   private readonly memoryStore: ConversationMemoryStore;
 
-  public constructor(config: { 
+  public constructor(config: {
     llmProvider: LLMProvider;
     policyEngine?: PolicyEngine;
     auditService?: AuditService;
@@ -289,10 +366,13 @@ export class HelmsmanAgentService implements AgentService {
     this.policyEngine = config.policyEngine;
     this.auditService = config.auditService;
     this.toolRegistry = config.toolRegistry;
-    this.memoryStore = config.memoryStore ?? new InMemoryConversationMemoryStore();
+    this.memoryStore =
+      config.memoryStore ?? new InMemoryConversationMemoryStore();
   }
 
-  public async handleMessage(message: NormalizedMessage): Promise<AgentResponse> {
+  public async handleMessage(
+    message: NormalizedMessage,
+  ): Promise<AgentResponse> {
     // 1. Log incoming message to audit
     await this.auditService?.log({
       type: "message_received",
@@ -303,13 +383,17 @@ export class HelmsmanAgentService implements AgentService {
 
     const toolDefinitions = this.toolRegistry?.getAllDefinitions() ?? [];
     const systemPrompt = buildSystemPrompt(JSON.stringify(toolDefinitions));
+    console.log("[HelmsmanAgent] SYSTEM PROMPT:\n", systemPrompt);
 
     const conversationId = `${message.platform}:${message.chatId}:${message.userId}`;
     const conversationHistory = this.memoryStore.getMessages(conversationId);
 
     // Working message list for the agentic loop — includes full conversation history + user's new message.
     // Each iteration appends the LLM's tool call + tool result so the LLM can chain multiple tools.
-    const loopMessages: LLMMessage[] = [...conversationHistory, { role: "user", content: message.text }];
+    const loopMessages: LLMMessage[] = [
+      ...conversationHistory,
+      { role: "user", content: message.text },
+    ];
     let lastModel = "";
     let lastToolOutput = "";
     let lastToolName = "";
@@ -319,12 +403,20 @@ export class HelmsmanAgentService implements AgentService {
       // ── Call LLM ──────────────────────────────────────────────────────────
       let llmResult: { text: string; model: string };
       try {
-        llmResult = await this.llmProvider.generate({ systemPrompt, messages: loopMessages });
+        llmResult = await this.llmProvider.generate({
+          systemPrompt,
+          messages: loopMessages,
+        });
       } catch {
         // LLM failed — if we gathered tool output, surface it via fallback
         if (lastToolOutput) {
           const fallback = summarizeRawOutputFallback(lastToolOutput);
-          rememberConversationTurn(this.memoryStore, conversationId, message.text, fallback);
+          rememberConversationTurn(
+            this.memoryStore,
+            conversationId,
+            message.text,
+            fallback,
+          );
           return {
             correlationId: message.correlationId,
             status: "success",
@@ -332,7 +424,9 @@ export class HelmsmanAgentService implements AgentService {
             metadata: { model: lastModel, toolName: lastToolName },
           };
         }
-        throw new Error("LLM call failed and no tool output available for fallback.");
+        throw new Error(
+          "LLM call failed and no tool output available for fallback.",
+        );
       }
 
       lastModel = llmResult.model;
@@ -349,7 +443,12 @@ export class HelmsmanAgentService implements AgentService {
       // No tool call → LLM produced a final text response
       if (!parsedToolCall) {
         const textResponse = sanitizeForUser(llmResult.text);
-        rememberConversationTurn(this.memoryStore, conversationId, message.text, textResponse);
+        rememberConversationTurn(
+          this.memoryStore,
+          conversationId,
+          message.text,
+          textResponse,
+        );
         return {
           correlationId: message.correlationId,
           status: "success",
@@ -359,7 +458,10 @@ export class HelmsmanAgentService implements AgentService {
       }
 
       // Duplicate tool call detection — LLM is stuck in a loop, break to fallback
-      const toolCallKey = JSON.stringify({ n: parsedToolCall.toolName, p: parsedToolCall.parameters });
+      const toolCallKey = JSON.stringify({
+        n: parsedToolCall.toolName,
+        p: parsedToolCall.parameters,
+      });
       if (seenToolCallKeys.includes(toolCallKey)) {
         break;
       }
@@ -368,12 +470,18 @@ export class HelmsmanAgentService implements AgentService {
       // ── First-iteration safety guards ─────────────────────────────────────
       if (iteration === 0) {
         if (
-          parsedToolCall.toolName === "shell.execute"
-          && isAmbiguousConfirmation(message.text)
-          && !didAssistantAskToProceed(conversationHistory)
+          parsedToolCall.toolName === "shell.execute" &&
+          isAmbiguousConfirmation(message.text) &&
+          !didAssistantAskToProceed(conversationHistory)
         ) {
-          const clarification = "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').";
-          rememberConversationTurn(this.memoryStore, conversationId, message.text, clarification);
+          const clarification =
+            "I need a specific instruction before running commands. Please tell me exactly what to do (for example: 'list running EC2 instances').";
+          rememberConversationTurn(
+            this.memoryStore,
+            conversationId,
+            message.text,
+            clarification,
+          );
           return {
             correlationId: message.correlationId,
             status: "success",
@@ -382,7 +490,10 @@ export class HelmsmanAgentService implements AgentService {
           };
         }
 
-        if (parsedToolCall.toolName === "shell.execute" && typeof parsedToolCall.parameters.command !== "string") {
+        if (
+          parsedToolCall.toolName === "shell.execute" &&
+          typeof parsedToolCall.parameters.command !== "string"
+        ) {
           return {
             correlationId: message.correlationId,
             status: "success",
@@ -396,7 +507,12 @@ export class HelmsmanAgentService implements AgentService {
       const tool = this.toolRegistry?.getTool(parsedToolCall.toolName);
       if (!tool) {
         const toolMissingResponse = `Tool '${parsedToolCall.toolName}' is not registered.`;
-        rememberConversationTurn(this.memoryStore, conversationId, message.text, toolMissingResponse);
+        rememberConversationTurn(
+          this.memoryStore,
+          conversationId,
+          message.text,
+          toolMissingResponse,
+        );
         return {
           correlationId: message.correlationId,
           status: "error",
@@ -414,7 +530,10 @@ export class HelmsmanAgentService implements AgentService {
       };
 
       let riskTier: RiskTier = tool.definition.riskTier;
-      if (tool instanceof ShellExecuteTool && typeof parsedToolCall.parameters.command === "string") {
+      if (
+        tool instanceof ShellExecuteTool &&
+        typeof parsedToolCall.parameters.command === "string"
+      ) {
         riskTier = tool.classifyRisk(parsedToolCall.parameters.command);
       }
 
@@ -435,19 +554,39 @@ export class HelmsmanAgentService implements AgentService {
       });
 
       if (policyDecision.action === "deny") {
-        const deniedResponse = policyDecision.reason ?? "Policy denied this action.";
-        rememberConversationTurn(this.memoryStore, conversationId, message.text, deniedResponse);
-        return { correlationId: message.correlationId, status: "error", text: deniedResponse };
+        const deniedResponse =
+          policyDecision.reason ?? "Policy denied this action.";
+        rememberConversationTurn(
+          this.memoryStore,
+          conversationId,
+          message.text,
+          deniedResponse,
+        );
+        return {
+          correlationId: message.correlationId,
+          status: "error",
+          text: deniedResponse,
+        };
       }
 
       if (policyDecision.action === "require_approval") {
-        const pendingApprovalResponse = policyDecision.reason ?? "This action requires approval.";
-        rememberConversationTurn(this.memoryStore, conversationId, message.text, pendingApprovalResponse);
+        const pendingApprovalResponse =
+          policyDecision.reason ?? "This action requires approval.";
+        rememberConversationTurn(
+          this.memoryStore,
+          conversationId,
+          message.text,
+          pendingApprovalResponse,
+        );
         return {
           correlationId: message.correlationId,
           status: "pending_approval",
           text: pendingApprovalResponse,
-          metadata: { toolName: parsedToolCall.toolName, parameters: parsedToolCall.parameters, riskTier },
+          metadata: {
+            toolName: parsedToolCall.toolName,
+            parameters: parsedToolCall.parameters,
+            riskTier,
+          },
         };
       }
 
@@ -455,10 +594,10 @@ export class HelmsmanAgentService implements AgentService {
       let toolResult = await tool.execute(parsedToolCall.parameters);
 
       if (
-        !toolResult.success
-        && tool instanceof ShellExecuteTool
-        && typeof parsedToolCall.parameters.command === "string"
-        && isAwsInvalidChoiceError(toolResult.error ?? "")
+        !toolResult.success &&
+        tool instanceof ShellExecuteTool &&
+        typeof parsedToolCall.parameters.command === "string" &&
+        isAwsInvalidChoiceError(toolResult.error ?? "")
       ) {
         try {
           const retryPlan = await this.llmProvider.generate({
@@ -478,14 +617,15 @@ export class HelmsmanAgentService implements AgentService {
 
           const retryToolCall = tryParseToolCall(retryPlan.text);
           if (
-            retryToolCall
-            && retryToolCall.toolName === "shell.execute"
-            && typeof retryToolCall.parameters.command === "string"
-            && tool.classifyRisk(retryToolCall.parameters.command) === "read_only"
+            retryToolCall &&
+            retryToolCall.toolName === "shell.execute" &&
+            typeof retryToolCall.parameters.command === "string" &&
+            tool.classifyRisk(retryToolCall.parameters.command) === "read_only"
           ) {
             const retryResult = await tool.execute(retryToolCall.parameters);
             if (retryResult.success) {
-              parsedToolCall.parameters.command = retryToolCall.parameters.command;
+              parsedToolCall.parameters.command =
+                retryToolCall.parameters.command;
               toolResult = retryResult;
             }
           }
@@ -495,13 +635,18 @@ export class HelmsmanAgentService implements AgentService {
       }
 
       if (
-        !toolResult.success
-        && tool instanceof ShellExecuteTool
-        && typeof parsedToolCall.parameters.command === "string"
-        && isCommandSubstitutionBlockedError(toolResult.error ?? "")
+        !toolResult.success &&
+        tool instanceof ShellExecuteTool &&
+        typeof parsedToolCall.parameters.command === "string" &&
+        isCommandSubstitutionBlockedError(toolResult.error ?? "")
       ) {
-        const rewrittenCommand = rewriteCostExplorerDateSubstitutions(parsedToolCall.parameters.command);
-        if (rewrittenCommand && tool.classifyRisk(rewrittenCommand) === "read_only") {
+        const rewrittenCommand = rewriteCostExplorerDateSubstitutions(
+          parsedToolCall.parameters.command,
+        );
+        if (
+          rewrittenCommand &&
+          tool.classifyRisk(rewrittenCommand) === "read_only"
+        ) {
           const retryResult = await tool.execute({
             ...parsedToolCall.parameters,
             command: rewrittenCommand,
@@ -518,14 +663,28 @@ export class HelmsmanAgentService implements AgentService {
         type: "tool_execution",
         userId: message.userId,
         correlationId: message.correlationId,
-        metadata: { toolName: parsedToolCall.toolName, success: toolResult.success },
+        metadata: {
+          toolName: parsedToolCall.toolName,
+          success: toolResult.success,
+        },
       });
 
       // Tool error → return immediately
       if (!toolResult.success) {
-        const toolErrorResponse = sanitizeForUser(summarizeToolError(toolResult.error ?? "Tool execution failed."));
-        rememberConversationTurn(this.memoryStore, conversationId, message.text, toolErrorResponse);
-        return { correlationId: message.correlationId, status: "error", text: toolErrorResponse };
+        const toolErrorResponse = sanitizeForUser(
+          summarizeToolError(toolResult.error ?? "Tool execution failed."),
+        );
+        rememberConversationTurn(
+          this.memoryStore,
+          conversationId,
+          message.text,
+          toolErrorResponse,
+        );
+        return {
+          correlationId: message.correlationId,
+          status: "error",
+          text: toolErrorResponse,
+        };
       }
 
       // ── Tool succeeded — feed result back to LLM for next iteration ───────
@@ -533,14 +692,22 @@ export class HelmsmanAgentService implements AgentService {
       lastToolName = parsedToolCall.toolName;
       loopMessages.push(
         { role: "assistant", content: llmResult.text },
-        { role: "user", content: `[Tool result]:\n${truncateForLLM(toolResult.output)}` },
+        {
+          role: "user",
+          content: `[Tool result]:\n${truncateForLLM(toolResult.output)}`,
+        },
       );
     }
 
     // Loop exhausted (max iterations or duplicate tool call) — deterministic fallback
     if (lastToolOutput) {
       const fallback = summarizeRawOutputFallback(lastToolOutput);
-      rememberConversationTurn(this.memoryStore, conversationId, message.text, fallback);
+      rememberConversationTurn(
+        this.memoryStore,
+        conversationId,
+        message.text,
+        fallback,
+      );
       return {
         correlationId: message.correlationId,
         status: "success",
@@ -549,8 +716,20 @@ export class HelmsmanAgentService implements AgentService {
       };
     }
 
-    const genericFallback = "On it — what specifically do you want me to look up?";
-    rememberConversationTurn(this.memoryStore, conversationId, message.text, genericFallback);
-    return { correlationId: message.correlationId, status: "success", text: genericFallback, metadata: { model: lastModel } };
+    const genericFallback =
+      "On it — what specifically do you want me to look up?";
+    rememberConversationTurn(
+      this.memoryStore,
+      conversationId,
+      message.text,
+      genericFallback,
+    );
+    return {
+      correlationId: message.correlationId,
+      status: "success",
+      text: genericFallback,
+      metadata: { model: lastModel },
+    };
   }
 }
+
