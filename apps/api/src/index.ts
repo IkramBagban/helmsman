@@ -12,11 +12,21 @@ if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && env.geminiApiKey) {
 }
 
 const bootstrap = async (): Promise<void> => {
-  const app = await createApp(env);
+  const { server, agentService } = await createApp(env);
 
-  app.listen(env.port, () => {
+  server.listen(env.port, () => {
     console.log(`Helmsman API is running on port ${env.port}`);
   });
+
+  // ── Graceful shutdown: clear all armed timers ───────────────────────────
+  const handleShutdown = (): void => {
+    console.log("Shutting down Helmsman API...");
+    agentService.getSchedulingService()?.stop();
+    server.close();
+    process.exit(0);
+  };
+  process.on("SIGTERM", handleShutdown);
+  process.on("SIGINT", handleShutdown);
 };
 
 bootstrap().catch((error) => {
