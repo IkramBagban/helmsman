@@ -13,6 +13,7 @@ export interface AgentService {
   registerSender(platform: string, sender: ScheduleMessageSender): void;
   getOrchestrator(): HelmsmanOrchestrator;
   getSchedulingService(): SchedulingService;
+  startSchedules(): Promise<void>;
 }
 
 export class CompositeSender implements ScheduleMessageSender {
@@ -106,7 +107,9 @@ export class CoreAgentService implements AgentService {
           : undefined,
       extraTools: schedulingTools,
     });
+  }
 
+  async startSchedules() {
     await this.schedulingService.start();
   }
 

@@ -32,11 +32,20 @@ export class WebTransport implements ScheduleMessageSender {
           const payload = JSON.parse(data.toString());
           const correlationId = randomUUID();
 
+          // Support stable session IDs from client
+          const chatId = payload.chatId || connectionId;
+          const userId = payload.userId || "web-user";
+          
+          // Re-map connection to this stable chatId if provided
+          if (payload.chatId) {
+            this.connections.set(payload.chatId, ws);
+          }
+
           // 1. Inbound Reception & Normalization
           const normalized: NormalizedMessage = {
             platform: "web",
-            chatId: connectionId, // Use connectionId as chatId for routing back
-            userId: payload.userId || "web-user",
+            chatId, 
+            userId,
             messageId: randomUUID(),
             text: payload.text,
             timestamp: new Date(),

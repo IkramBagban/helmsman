@@ -90,6 +90,9 @@ export const createApp = async (env: ApiEnv, dependencies?: ApiAppDependencies):
     };
   }
 
+  // 4. Start Scheduling (after senders registered)
+  await agentService.startSchedules();
+
   const telegramWebhookHandler = dependencies?.telegramWebhookHandler
     ?? await createTelegramWebhookHandler(env, telegramDeps as any);
 
