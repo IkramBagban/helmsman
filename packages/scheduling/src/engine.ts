@@ -411,7 +411,7 @@ export class SchedulerEngine {
       } else {
         const taskText = schedule.action.taskText ?? schedule.sourceText;
         const response = await this.orchestrator.handleMessage({
-          platform: schedule.platform === "website" ? "telegram" : schedule.platform,
+          platform: (schedule.platform === "website" || schedule.platform === "web") ? "web" : (schedule.platform as any),
           chatId: schedule.chatId,
           messageId: `schedule-${schedule.id}-${Date.now()}`,
           userId: schedule.ownerUserId,

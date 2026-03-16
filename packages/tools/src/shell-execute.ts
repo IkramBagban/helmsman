@@ -39,7 +39,7 @@ Use this tool when you need to interact with cloud infrastructure or Kubernetes.
 The command runs in a restricted sandbox: only allowed binaries, no shell chaining,
 30-second timeout, captured output.
 
-Supported CLIs:
+Supported CLIs (to be passed in the 'command' parameter):
 - aws (AWS CLI — covers ALL 300+ AWS services and their operations)
 - kubectl (Kubernetes cluster management)
 - helm (Kubernetes package management)
