@@ -1,4 +1,4 @@
-import { createFileLogger } from "@helmsman/shared";
+import { createFileLogger } from "@helmsman/shared/file-logger";
 
 type JsonLike = Record<string, unknown>;
 

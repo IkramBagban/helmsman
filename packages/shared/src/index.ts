@@ -1,4 +1,4 @@
-export type Platform = "telegram" | "slack";
+export type Platform = "telegram" | "slack" | "web";
 
 export interface NormalizedMessage {
   readonly platform: Platform;
@@ -183,4 +183,3 @@ export const isTelegramUpdate = (payload: unknown): payload is TelegramUpdate =>
 
   return true;
 };
-export { createFileLogger, type FileLogger, type FileLogEntry, type FileLoggerOptions } from "./file-logger.js";

@@ -403,11 +403,11 @@ export class SchedulerEngine {
         }).finally(() => clearTimeout(timeout));
 
         resultSummary = `HTTP ${response.status} from ${schedule.action.url}`;
-        await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled HTTP check: ${resultSummary}`);
+        await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled HTTP check: ${resultSummary}`, schedule.platform);
       } else if (schedule.action.type === "reminder") {
         const reminder = schedule.action.reminderText ?? schedule.action.title;
         resultSummary = `Reminder delivered: ${reminder}`;
-        await this.sender.sendResponse(schedule.chatId, `⏱️ Reminder: ${reminder}`);
+        await this.sender.sendResponse(schedule.chatId, `⏱️ Reminder: ${reminder}`, schedule.platform);
       } else {
         const taskText = schedule.action.taskText ?? schedule.sourceText;
         const response = await this.orchestrator.handleMessage({
@@ -432,9 +432,10 @@ export class SchedulerEngine {
           await this.sender.sendResponse(
             schedule.chatId,
             `⚠️ Scheduled task failed (${schedule.action.title}): ${response.text}`,
+            schedule.platform
           );
         } else {
-          await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled task result:\n${response.text}`);
+          await this.sender.sendResponse(schedule.chatId, `⏱️ Scheduled task result:\n${response.text}`, schedule.platform);
         }
       }
     } catch (error) {
@@ -445,6 +446,7 @@ export class SchedulerEngine {
         await this.sender.sendResponse(
           schedule.chatId,
           `⚠️ Scheduled task failed (${schedule.action.title}): ${errorSummary}`,
+          schedule.platform
         );
       } catch (sendError) {
         console.error(`Failed to send error notification for schedule ${schedule.id}:`, sendError);
@@ -491,8 +493,9 @@ export class SchedulerEngine {
     if (shouldWarn && runStatus === "failed") {
       try {
         await this.sender.sendResponse(
-          schedule.chatId,
+          latestSchedule.chatId,
           `⚠️ Schedule ${latestSchedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
+          latestSchedule.platform
         );
       } catch (sendError) {
         console.error(`Failed to send failure warning for schedule ${latestSchedule.id}:`, sendError);
@@ -504,6 +507,7 @@ export class SchedulerEngine {
         await this.sender.sendResponse(
           latestSchedule.chatId,
           `✅ Schedule "${latestSchedule.action.title}" completed all ${latestSchedule.pattern.maxRuns} runs.`,
+          latestSchedule.platform
         );
       } catch (sendError) {
         console.error(`Failed to send completion notification for schedule ${latestSchedule.id}:`, sendError);

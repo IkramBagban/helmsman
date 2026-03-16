@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler } from "express";
 
-import { AppError, createFileLogger } from "@helmsman/shared";
+import { AppError } from "@helmsman/shared";
+import { createFileLogger } from "@helmsman/shared/file-logger";
 
 const logger = createFileLogger({ component: "api" });
 
