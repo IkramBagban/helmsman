@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request as ExpressRequest, Response as ExpressResponse } from "express";
 import { Redis } from "ioredis";
+import { createServer } from "node:http";
 
 import type { ApiEnv } from "./config.js";
 import { correlationIdMiddleware, CORRELATION_ID_HEADER } from "./middleware/correlation-id.js";
@@ -13,7 +14,9 @@ import {
   type TelegramWebhookHandler,
 } from "./routes/telegram.js";
 import { RedisCapabilityStore } from "@helmsman/action-gateway";
-import { InMemoryDedupStore, RedisDedupStore } from "@helmsman/transport";
+import { InMemoryDedupStore, RedisDedupStore, TelegramSender } from "@helmsman/transport";
+import { CoreAgentService } from "./services/agent-service.js";
+import { WebTransport } from "./transports/web/web-transport.js";
 
 export interface ApiAppDependencies {
   readonly telegram?: TelegramWebhookDependencies;
@@ -41,28 +44,54 @@ const toHeaderEntries = (request: ExpressRequest, response: ExpressResponse): [s
   return entries;
 };
 
-export const createApp = async (env: ApiEnv, dependencies?: ApiAppDependencies): Promise<express.Express> => {
+export const createApp = async (env: ApiEnv, dependencies?: ApiAppDependencies): Promise<{ app: express.Express; server: any; agentService: CoreAgentService }> => {
   const app = express();
+  const server = createServer(app);
 
+  // 1. Core Agent Service (Central logic)
+  let capabilityStore;
+  if (env.redisUrl) {
+    capabilityStore = new RedisCapabilityStore(new Redis(env.redisUrl));
+  }
+  const agentService = new CoreAgentService(env, capabilityStore);
+  await agentService.initialize();
+
+  // 2. Web Transport (WebSocket)
+  new WebTransport(server, agentService);
+
+  // 3. Telegram Transport
   let telegramDeps = dependencies?.telegram;
+  const telegramSender = telegramDeps?.sender ?? new TelegramSender(env.telegramBotToken);
+  
+  // Register telegram sender for multi-platform scheduling
+  agentService.registerSender("telegram", telegramSender);
+
   if (!telegramDeps?.dedupStore) {
     if (env.redisUrl) {
       const redis = new Redis(env.redisUrl);
       telegramDeps = {
         ...telegramDeps,
+        agentService,
+        sender: telegramSender,
         dedupStore: new RedisDedupStore(redis),
-        capabilityStore: new RedisCapabilityStore(redis),
       };
     } else {
       telegramDeps = {
         ...telegramDeps,
+        agentService,
+        sender: telegramSender,
         dedupStore: new InMemoryDedupStore(),
       };
     }
+  } else if (!telegramDeps.sender) {
+    telegramDeps = {
+        ...telegramDeps,
+        sender: telegramSender,
+    };
   }
 
   const telegramWebhookHandler = dependencies?.telegramWebhookHandler
-    ?? await createTelegramWebhookHandler(env, telegramDeps);
+    ?? await createTelegramWebhookHandler(env, telegramDeps as any);
 
   app.use(correlationIdMiddleware());
   app.use(requestLoggingMiddleware());
@@ -103,5 +132,5 @@ export const createApp = async (env: ApiEnv, dependencies?: ApiAppDependencies):
 
   app.use(errorHandlerMiddleware());
 
-  return app;
+  return { app, server, agentService };
 };

@@ -12,20 +12,22 @@
   "dependencies": {
     "@helmsman/action-gateway": "*",
     "@helmsman/agent-core": "*",
-    "@helmsman/transport": "*",
-    "@helmsman/shared": "*",
     "@helmsman/scheduling": "*",
+    "@helmsman/shared": "*",
+    "@helmsman/transport": "*",
     "express": "^5.2.1",
-    "ioredis": "^5.10.0"
+    "ioredis": "^5.10.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@repo/typescript-config": "*",
+    "@types/bun": "latest",
     "@types/express": "^5.0.6",
     "@types/ioredis": "^5.0.0",
     "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
     "bun-types": "^1.3.10",
-    "typescript": "5.9.2",
-    "@types/bun": "latest"
+    "typescript": "5.9.2"
   },
   "module": "src/index.ts"
 }
