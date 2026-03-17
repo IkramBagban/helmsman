@@ -27,7 +27,6 @@ Supported CLIs:
 - helm (Kubernetes package management)
 - docker (inspect-only operations)
 - curl (HTTP calls)
-- jq (JSON processing)
 
 Safety rules enforced automatically:
 - Only allowlisted binaries can run
@@ -37,12 +36,12 @@ Safety rules enforced automatically:
 - Output truncated to 64 KB
 
 When generating commands:
+- NEVER use pipes (e.g. '| jq'), shell substitution (\$() or backticks), or chaining. Commands are passed directly to exec, not a shell.
+- For AWS CLI, you MUST use '--query' for filtering instead of piping to jq.
 - Use --output json (or --output table) for AWS CLI for structured data
 - Use --region to be explicit about which region
-- Use --query for JMESPath filtering to reduce noise
 - Prefer describe/list before modify/delete (check state first)
 - For large result sets, use --max-items or --page-size
-- Never use shell substitution ($() or backticks) — always provide literal values
 
 Examples:
 - "aws ec2 describe-instances --region us-east-1 --output json"
