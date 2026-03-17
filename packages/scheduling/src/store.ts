@@ -185,6 +185,17 @@ export class JsonScheduleRepository {
     });
   }
 
+  public async deleteSchedule(id: string): Promise<void> {
+    await this.enqueueWrite(async () => {
+      const document = await safeReadJson<ScheduleStoreDocument>(this.schedulesPath, defaultScheduleStore());
+      const next = {
+        ...document,
+        schedules: document.schedules.filter((item) => item.id !== id),
+      } satisfies ScheduleStoreDocument;
+      await writeJsonAtomic(this.schedulesPath, next);
+    });
+  }
+
   public async getScheduleById(id: string): Promise<ScheduleRecord | null> {
     const document = await safeReadJson<ScheduleStoreDocument>(this.schedulesPath, defaultScheduleStore());
     return document.schedules.find((item) => item.id === id) ?? null;

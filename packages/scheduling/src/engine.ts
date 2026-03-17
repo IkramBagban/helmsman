@@ -317,18 +317,24 @@ export class SchedulerEngine {
     });
   }
 
-  public async resume(scheduleId: string): Promise<void> {
+  public async resume(scheduleId: string): Promise<boolean> {
     const schedule = await this.repository.getScheduleById(scheduleId);
-    if (!schedule || schedule.status === "cancelled") {
-      return;
+    if (!schedule) {
+      return false;
+    }
+
+    if (schedule.status === "active") {
+      return true;
     }
 
     await this.repository.updateSchedule({
       ...schedule,
       status: "active",
+      consecutiveFailures: 0,
       updatedAtIso: toIso(new Date()),
     });
     await this.arm(scheduleId);
+    return true;
   }
 
   public async cancel(scheduleId: string): Promise<void> {
@@ -343,6 +349,29 @@ export class SchedulerEngine {
       nextRunAtIso: undefined,
       updatedAtIso: toIso(new Date()),
     });
+  }
+
+  public async delete(scheduleId: string): Promise<void> {
+    this.clearTimer(scheduleId);
+    await this.repository.deleteSchedule(scheduleId);
+  }
+
+  public async runNow(scheduleId: string): Promise<boolean> {
+    const schedule = await this.repository.getScheduleById(scheduleId);
+    if (!schedule) {
+      return false;
+    }
+
+    if (schedule.status !== "active" && schedule.status !== "degraded") {
+      await this.repository.updateSchedule({
+        ...schedule,
+        status: "active",
+        updatedAtIso: toIso(new Date()),
+      });
+    }
+
+    await this.run(scheduleId, new Date());
+    return true;
   }
 
   private clearTimer(scheduleId: string): void {

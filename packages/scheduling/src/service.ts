@@ -71,12 +71,14 @@ export interface ListSchedulesResult {
     patternDescription: string;
     status: string;
     nextRunAt?: string;
+    lastRunAt?: string;
+    runsCompleted: number;
   }[];
   readonly message: string;
 }
 
 export interface ManageScheduleInput {
-  readonly action: "pause" | "resume" | "cancel" | "cancel_all" | "change_time";
+  readonly action: "pause" | "resume" | "cancel" | "cancel_all" | "change_time" | "delete" | "run";
   readonly userId: string;
   readonly chatId: string;
   readonly targetId?: string;
@@ -228,10 +230,11 @@ export class SchedulingService {
    * List schedules for a user/chat.
    */
   public async listSchedules(userId: string, chatId: string): Promise<ListSchedulesResult> {
-    const schedules = await this.repository.listSchedulesByOwner(userId, chatId);
+    const all = await this.repository.listSchedulesByOwner(userId, chatId);
+    const schedules = all.filter((s) => s.status !== "cancelled" && s.status !== "completed");
 
     if (schedules.length === 0) {
-      return { success: true, schedules: [], message: "No schedules found." };
+      return { success: true, schedules: [], message: "No active schedules found." };
     }
 
     return {
@@ -243,6 +246,8 @@ export class SchedulingService {
         patternDescription: formatPattern(item.pattern),
         status: item.status,
         nextRunAt: item.nextRunAtIso,
+        lastRunAt: item.lastRunAtIso,
+        runsCompleted: item.runsCompleted,
       })),
       message: `Found ${schedules.length} schedule(s).`,
     };
@@ -255,13 +260,16 @@ export class SchedulingService {
     const schedules = await this.repository.listSchedulesByOwner(input.userId, input.chatId);
 
     if (input.action === "cancel_all") {
-      if (schedules.length === 0) {
+      const cancellable = schedules.filter((s) =>
+        s.status === "active" || s.status === "degraded" || s.status === "paused"
+      );
+      if (cancellable.length === 0) {
         return { success: true, message: "No active schedules to cancel." };
       }
-      for (const item of schedules) {
+      for (const item of cancellable) {
         await this.engine.cancel(item.id);
       }
-      return { success: true, message: `Cancelled ${schedules.length} schedule(s).` };
+      return { success: true, message: `Cancelled ${cancellable.length} schedule(s).` };
     }
 
     if (!input.targetId) {
@@ -279,7 +287,13 @@ export class SchedulingService {
     }
 
     if (input.action === "resume") {
-      await this.engine.resume(target.id);
+      if (target.status === "active") {
+        return { success: true, message: `Schedule ${target.id.slice(0, 8)} (${target.action.title}) is already active.` };
+      }
+      const resumed = await this.engine.resume(target.id);
+      if (!resumed) {
+        return { success: false, message: `Could not resume schedule ${target.id.slice(0, 8)}.` };
+      }
       return { success: true, message: `Resumed schedule ${target.id.slice(0, 8)} (${target.action.title}).` };
     }
 
@@ -307,6 +321,40 @@ export class SchedulingService {
       };
     }
 
+    if (input.action === "delete") {
+      await this.engine.delete(target.id);
+      return { success: true, message: `Deleted schedule ${target.id.slice(0, 8)} (${target.action.title}).` };
+    }
+
+    if (input.action === "run") {
+      this.engine.runNow(target.id).catch(console.error);
+      return { success: true, message: `Triggered manual run for schedule ${target.id.slice(0, 8)} (${target.action.title}).` };
+    }
+
     return { success: false, message: "Unsupported schedule action." };
+  }
+
+  public async getScheduleRuns(scheduleId: string, userId: string, chatId: string, limit: number = 10): Promise<{
+    success: boolean;
+    runs: readonly { status: string; startedAt: string; finishedAt: string; summary?: string }[];
+    message: string;
+  }> {
+    const schedules = await this.repository.listSchedulesByOwner(userId, chatId);
+    const target = resolveByTarget(schedules, scheduleId);
+    if (!target) {
+      return { success: false, runs: [], message: "No matching schedule found." };
+    }
+
+    const runs = await this.repository.listRuns(target.id, limit);
+    return {
+      success: true,
+      runs: runs.map((r) => ({
+        status: r.status,
+        startedAt: r.startedAtIso,
+        finishedAt: r.finishedAtIso,
+        summary: r.resultSummary,
+      })),
+      message: runs.length > 0 ? `Found ${runs.length} run(s).` : "No runs yet.",
+    };
   }
 }

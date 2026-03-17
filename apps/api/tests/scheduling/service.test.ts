@@ -212,7 +212,7 @@ describe("SchedulingService.listSchedules", () => {
     const result = await service.listSchedules("user-1", "chat-1");
     expect(result.success).toBe(true);
     expect(result.schedules).toHaveLength(0);
-    expect(result.message).toContain("No schedules");
+    expect(result.message).toContain("No active schedules");
   });
 
   it("lists created schedules", async () => {
