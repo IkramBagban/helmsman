@@ -26,14 +26,14 @@ export class CompositeSender implements ScheduleMessageSender {
   async sendTyping(chatId: string, platform?: string): Promise<void> {
     const sender = platform ? this.senders.get(platform) : null;
     if (sender) {
-      await sender.sendTyping(chatId);
+      await sender.sendTyping(chatId, platform);
     }
   }
 
   async sendResponse(chatId: string, text: string, platform?: string): Promise<void> {
     const sender = platform ? this.senders.get(platform) : null;
     if (sender) {
-      await sender.sendResponse(chatId, text);
+      await sender.sendResponse(chatId, text, platform);
     } else {
       console.warn(`No sender registered for platform: ${platform}. Dropping message for ${chatId}.`);
     }

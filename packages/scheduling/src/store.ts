@@ -27,8 +27,18 @@ const nowIso = (): string => new Date().toISOString();
 const writeJsonAtomic = async <T>(path: string, value: T): Promise<void> => {
   await mkdir(dirname(path), { recursive: true });
   const tempPath = `${path}.tmp`;
-  await writeFile(tempPath, JSON.stringify(value, null, 2), "utf8");
-  await rename(tempPath, path);
+  const data = JSON.stringify(value, null, 2);
+  await writeFile(tempPath, data, "utf8");
+  try {
+    await rename(tempPath, path);
+  } catch (error: any) {
+    if (error.code === "EPERM" || error.code === "EBUSY") {
+      // Fallback for Windows file locks (e.g., when Vite is watching the file)
+      await writeFile(path, data, "utf8");
+    } else {
+      throw error;
+    }
+  }
 };
 
 const safeReadJson = async <T>(path: string, fallback: T): Promise<T> => {

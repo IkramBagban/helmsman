@@ -411,7 +411,7 @@ export class SchedulerEngine {
       } else {
         const taskText = schedule.action.taskText ?? schedule.sourceText;
         const response = await this.orchestrator.handleMessage({
-          platform: (schedule.platform === "website" || schedule.platform === "web") ? "web" : (schedule.platform as any),
+          platform: (schedule.platform as string === "website" || schedule.platform as string === "web") ? "web" : (schedule.platform as any),
           chatId: schedule.chatId,
           messageId: `schedule-${schedule.id}-${Date.now()}`,
           userId: schedule.ownerUserId,
@@ -448,8 +448,8 @@ export class SchedulerEngine {
           `⚠️ Scheduled task failed (${schedule.action.title}): ${errorSummary}`,
           schedule.platform
         );
-      } catch (sendError) {
-        console.error(`Failed to send error notification for schedule ${schedule.id}:`, sendError);
+      } catch (sendError: any) {
+        console.warn(`Failed to send error notification for schedule ${schedule.id}: ${sendError.message}`);
       }
     }
 
@@ -497,8 +497,8 @@ export class SchedulerEngine {
           `⚠️ Schedule ${latestSchedule.id.slice(0, 8)} has failed ${consecutiveFailures} times in a row.`,
           latestSchedule.platform
         );
-      } catch (sendError) {
-        console.error(`Failed to send failure warning for schedule ${latestSchedule.id}:`, sendError);
+      } catch (sendError: any) {
+        console.warn(`Failed to send failure warning for schedule ${latestSchedule.id}: ${sendError.message}`);
       }
     }
 
@@ -509,8 +509,8 @@ export class SchedulerEngine {
           `✅ Schedule "${latestSchedule.action.title}" completed all ${latestSchedule.pattern.maxRuns} runs.`,
           latestSchedule.platform
         );
-      } catch (sendError) {
-        console.error(`Failed to send completion notification for schedule ${latestSchedule.id}:`, sendError);
+      } catch (sendError: any) {
+        console.warn(`Failed to send completion notification for schedule ${latestSchedule.id}: ${sendError.message}`);
       }
     }
 
