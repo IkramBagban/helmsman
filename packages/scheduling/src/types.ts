@@ -1,3 +1,5 @@
+import type { Platform } from "@helmsman/shared";
+
 export type ScheduleStatus = "active" | "paused" | "cancelled" | "degraded" | "completed";
 
 export type ScheduleActionType = "agent_task" | "http_ping" | "reminder";
@@ -7,7 +9,7 @@ export type ScheduleRiskTier = "read_only" | "low_risk" | "significant" | "destr
 export type SchedulePatternType = "once" | "interval" | "daily_times";
 
 export interface ScheduleSourceContext {
-  readonly platform: "telegram" | "slack" | "website";
+  readonly platform: Platform;
   readonly chatId: string;
   readonly userId: string;
   readonly messageId: string;

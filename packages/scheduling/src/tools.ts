@@ -236,7 +236,7 @@ Risk assessment — you MUST set riskHint:
   // ── list_schedules ──────────────────────────────────────────────────────
   const listSchedulesTool = createTool({
     id: "list_schedules",
-    description: `List the user's current active schedules.
+    description: `List schedules for the user.
 
 Use this when the user asks:
 - "what schedules do I have"
@@ -244,10 +244,12 @@ Use this when the user asks:
 - "show my reminders"
 - "what's scheduled"
 
-Returns active/paused/degraded schedules (cancelled and completed are filtered out).`,
+By default, it only shows 'active' schedules (including paused/degraded). Set statusFilter to 'all' to include cancelled/completed jobs.`,
     inputSchema: z.object({
       userId: z.string().describe("The user ID to list schedules for."),
       chatId: z.string().describe("The chat ID to list schedules for."),
+      statusFilter: z.enum(["active", "terminal", "all"]).default("active")
+        .describe("Filter by status. 'active' (default) hides cancelled/completed. 'terminal' only shows cancelled/completed. 'all' shows everything."),
     }),
     outputSchema: z.object({
       success: z.boolean(),
@@ -265,7 +267,7 @@ Returns active/paused/degraded schedules (cancelled and completed are filtered o
     }),
     execute: async (input) => {
       try {
-        const result = await schedulingService.listSchedules(input.userId, input.chatId);
+        const result = await schedulingService.listSchedules(input.userId, input.chatId, input.statusFilter);
         return result;
       } catch (error) {
         return {

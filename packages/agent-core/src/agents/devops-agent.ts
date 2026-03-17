@@ -215,12 +215,6 @@ export interface DevOpsAgentConfig {
 export function createDevOpsAgent(config: DevOpsAgentConfig): Agent {
   const model = config.model ?? "google/gemini-2.0-flash";
 
-  console.log("soul:", AGENT_SOUL);
-  if (AGENT_SOUL_PATH) {
-    console.log("[HelmsmanAgent] SOUL PATH:", AGENT_SOUL_PATH);
-  }
-  console.log("[HelmsmanAgent] SYSTEM PROMPT:\n", DEVOPS_AGENT_INSTRUCTIONS);
-
   return new Agent({
     id: "helmsman-devops",
     name: "Helmsman",

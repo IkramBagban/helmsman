@@ -31,7 +31,9 @@ const formatPattern = (pattern: SchedulePattern): string => {
 };
 
 const resolveByTarget = (schedules: readonly ScheduleRecord[], targetText: string): ScheduleRecord | null => {
-  const target = targetText.trim().toLowerCase();
+  // Strip leading # or @ common in natural language references
+  const target = targetText.trim().toLowerCase().replace(/^[#@]/, "");
+  
   const byId = schedules.find((item) => item.id.toLowerCase().startsWith(target));
   if (byId) {
     return byId;
@@ -229,12 +231,25 @@ export class SchedulingService {
   /**
    * List schedules for a user/chat.
    */
-  public async listSchedules(userId: string, chatId: string): Promise<ListSchedulesResult> {
+  public async listSchedules(
+    userId: string,
+    chatId: string,
+    statusFilter: "active" | "all" | "terminal" = "active"
+  ): Promise<ListSchedulesResult> {
     const all = await this.repository.listSchedulesByOwner(userId, chatId);
-    const schedules = all.filter((s) => s.status !== "cancelled" && s.status !== "completed");
+    
+    let schedules = all;
+    if (statusFilter === "active") {
+      schedules = all.filter((s) => s.status !== "cancelled" && s.status !== "completed");
+    } else if (statusFilter === "terminal") {
+      schedules = all.filter((s) => s.status === "cancelled" || s.status === "completed");
+    }
 
     if (schedules.length === 0) {
-      return { success: true, schedules: [], message: "No active schedules found." };
+      const msg = statusFilter === "active" ? "No active schedules found." :
+                 statusFilter === "terminal" ? "No cancelled or completed schedules found." :
+                 "No schedules found.";
+      return { success: true, schedules: [], message: msg };
     }
 
     return {
