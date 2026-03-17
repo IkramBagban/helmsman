@@ -236,15 +236,15 @@ Risk assessment — you MUST set riskHint:
   // ── list_schedules ──────────────────────────────────────────────────────
   const listSchedulesTool = createTool({
     id: "list_schedules",
-    description: `List the user's current schedules.
+    description: `List the user's current active schedules.
 
 Use this when the user asks:
 - "what schedules do I have"
-- "list my schedules"
+- "list my schedules / cron jobs"
 - "show my reminders"
 - "what's scheduled"
 
-Returns all schedules for the given user/chat, including status and next run time.`,
+Returns active/paused/degraded schedules (cancelled and completed are filtered out).`,
     inputSchema: z.object({
       userId: z.string().describe("The user ID to list schedules for."),
       chatId: z.string().describe("The chat ID to list schedules for."),
@@ -258,6 +258,8 @@ Returns all schedules for the given user/chat, including status and next run tim
         patternDescription: z.string(),
         status: z.string(),
         nextRunAt: z.string().optional(),
+        lastRunAt: z.string().optional(),
+        runsCompleted: z.number(),
       })),
       message: z.string(),
     }),
@@ -275,24 +277,64 @@ Returns all schedules for the given user/chat, including status and next run tim
     },
   });
 
+  // ── get_schedule_runs ───────────────────────────────────────────────────
+  const getScheduleRunsTool = createTool({
+    id: "get_schedule_runs",
+    description: `Get the run history for a specific schedule.
+
+Use this when the user asks:
+- "show me the last runs for the billing check"
+- "what happened with my daily report?"
+- "did the health check run successfully?"
+
+Provide either a schedule ID prefix or the schedule title as targetId.`,
+    inputSchema: z.object({
+      userId: z.string().describe("The user ID."),
+      chatId: z.string().describe("The chat ID."),
+      targetId: z.string().describe("Schedule ID prefix or title."),
+      limit: z.number().int().positive().max(50).default(10).describe("Max runs to return."),
+    }),
+    outputSchema: z.object({
+      success: z.boolean(),
+      runs: z.array(z.object({
+        status: z.string(),
+        startedAt: z.string(),
+        finishedAt: z.string(),
+        summary: z.string().optional(),
+      })),
+      message: z.string(),
+    }),
+    execute: async (input) => {
+      try {
+        return await schedulingService.getScheduleRuns(input.targetId, input.userId, input.chatId, input.limit);
+      } catch (error) {
+        return {
+          success: false,
+          runs: [],
+          message: error instanceof Error ? error.message : "Failed to get run history.",
+        };
+      }
+    },
+  });
+
   // ── manage_schedule ─────────────────────────────────────────────────────
   const manageScheduleTool = createTool({
     id: "manage_schedule",
-    description: `Manage an existing schedule: pause, resume, cancel, or change its time.
+    description: `Manage an existing schedule: pause, resume, cancel, change its time, delete, or run it immediately.
 
 Use this when the user asks to:
-- "pause the billing check"
-- "resume my reminder"
+- "pause the billing check" (stop)
+- "resume my reminder" (start)
+- "run the daily report now" (trigger manually)
 - "cancel all schedules"
 - "change the daily report to 10am"
-- "stop the EC2 check schedule"
 
 For cancel_all, targetId is not required.
 For change_time, provide the updated pattern.
-For pause/resume/cancel, provide either a schedule ID prefix or the schedule title as targetId.`,
+For pause/resume/cancel/delete/run, provide either a schedule ID prefix or the schedule title as targetId.`,
     inputSchema: z.object({
-      action: z.enum(["pause", "resume", "cancel", "cancel_all", "change_time"])
-        .describe("The management action to perform."),
+      action: z.enum(["pause", "resume", "cancel", "cancel_all", "change_time", "delete", "run"])
+        .describe("The management action to perform. 'pause' = stop, 'resume' = start, 'run' = manual trigger, 'delete' = absolute removal."),
       userId: z.string().describe("The user ID performing the action."),
       chatId: z.string().describe("The chat ID where the action was requested."),
       targetId: z.string().optional()
@@ -327,6 +369,7 @@ For pause/resume/cancel, provide either a schedule ID prefix or the schedule tit
   return {
     create_schedule: createScheduleTool,
     list_schedules: listSchedulesTool,
+    get_schedule_runs: getScheduleRunsTool,
     manage_schedule: manageScheduleTool,
   } as Record<string, any>;
 }
