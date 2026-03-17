@@ -1,10 +1,9 @@
 import * as React from "react"
-import { Send, User, Anchor, Terminal, Bot, Wifi, WifiOff } from "lucide-react"
+import { Send, User, Anchor, Terminal, Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { useChat } from "@/hooks/use-chat"
 
 export function ChatInterface() {
@@ -28,45 +27,55 @@ export function ChatInterface() {
   }, [messages, isTyping])
 
   return (
-    <div className="flex flex-col h-full relative overflow-hidden bg-background">
+    <div className="flex flex-col h-full relative overflow-hidden bg-[#050506] text-zinc-100">
+      {/* Background Glow */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute top-[-10%] left-[-5%] size-[500px] rounded-full bg-cyan-500/10 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-5%] size-[500px] rounded-full bg-violet-500/10 blur-[120px]" />
+      </div>
+
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="flex items-center gap-3">
+      <header className="flex items-center justify-between px-8 py-6 border-b border-white/5 bg-black/20 backdrop-blur-md sticky top-0 z-10">
+        <div className="flex items-center gap-4">
           <div className="relative">
-            <div className="size-10 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20">
-              <Bot className="size-6 text-primary" />
+            <div className="size-12 rounded-2xl bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.15)]">
+              <Bot className="size-7 text-cyan-400" />
             </div>
             <div className={cn(
-              "absolute bottom-0 right-0 size-3 rounded-full border-2 border-background",
-              isConnected ? "bg-green-500" : "bg-red-500"
+              "absolute -bottom-1 -right-1 size-4 rounded-full border-4 border-[#050506]",
+              isConnected ? "bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)]" : "bg-zinc-700"
             )} />
           </div>
           <div>
-            <h2 className="font-semibold text-foreground">Helmsman Agent</h2>
-            <div className="flex items-center gap-1.5">
-              <p className="text-xs text-muted-foreground">
-                {isConnected ? "Ready for deployment" : "Disconnected from Bridge"}
-              </p>
-              {isConnected ? <Wifi className="size-3 text-green-500/50" /> : <WifiOff className="size-3 text-red-500/50" />}
+            <h2 className="text-lg font-semibold tracking-tight text-white">Helmsman Bridge</h2>
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-zinc-500">
+                {isConnected ? (
+                  <>
+                    <span className="size-1.5 rounded-full bg-green-500 animate-pulse" />
+                    Secure Link Active
+                  </>
+                ) : "Terminal Offline"}
+              </span>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-2 h-8">
-                <Terminal className="size-3.5" />
-                <span>Logs</span>
+        <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" className="gap-2 h-9 rounded-xl border border-white/5 bg-white/5 transition-colors hover:bg-white/10 text-zinc-400">
+                <Terminal className="size-4" />
+                <span className="text-xs font-medium">Telemetry</span>
             </Button>
         </div>
       </header>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 px-4 py-6 md:px-8" viewportRef={scrollRef}>
-        <div className="max-w-3xl mx-auto space-y-8 pb-32">
+      <ScrollArea className="flex-1 px-4 py-6 md:px-8 relative z-0" viewportRef={scrollRef}>
+        <div className="max-w-4xl mx-auto space-y-10 pb-40">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center opacity-50">
-              <Anchor className="size-12 mb-4 text-primary" />
-              <h3 className="text-lg font-medium">No active signals</h3>
-              <p className="text-sm max-w-xs">Start a conversation with the Helmsman to begin orchestrating your infrastructure.</p>
+            <div className="flex flex-col items-center justify-center py-20 text-center opacity-40">
+              <Anchor className="size-16 mb-6 text-cyan-500/50" />
+              <h3 className="text-xl font-medium text-white">Idle Command Deck</h3>
+              <p className="text-sm text-zinc-400 max-w-sm mt-2 font-light">The Helmsman is on standby. Issue a directive to begin infrastructure orchestration.</p>
             </div>
           )}
           
@@ -74,49 +83,51 @@ export function ChatInterface() {
             <div
               key={msg.id}
               className={cn(
-                "flex gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300",
+                "flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out",
                 msg.sender === "user" ? "flex-row-reverse" : "flex-row"
               )}
             >
-              <Avatar className={cn(
-                  "size-9 border",
-                  msg.sender === "user" ? "border-primary/20" : "border-border shadow-sm"
-              )}>
-                <AvatarFallback className={cn(
-                    msg.sender === "user" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-                )}>
-                  {msg.sender === "user" ? <User className="size-5" /> : <Anchor className="size-5" />}
-                </AvatarFallback>
-              </Avatar>
               <div className={cn(
-                  "flex flex-col gap-2 max-w-[85%]",
+                  "size-10 rounded-xl flex items-center justify-center shrink-0 shadow-2xl",
+                  msg.sender === "user" 
+                    ? "bg-zinc-800 border border-zinc-700 text-zinc-400" 
+                    : "bg-cyan-500 text-black shadow-cyan-500/20"
+              )}>
+                {msg.sender === "user" ? <User className="size-5" /> : <Bot className="size-5" />}
+              </div>
+              <div className={cn(
+                  "flex flex-col gap-2.5 max-w-[80%]",
                   msg.sender === "user" ? "items-end" : "items-start"
               )}>
                 <div
                   className={cn(
-                    "px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm transition-all",
+                    "px-5 py-4 rounded-[24px] text-sm leading-relaxed transition-all tracking-tight",
                     msg.sender === "user"
-                      ? "bg-primary text-primary-foreground rounded-tr-none shadow-primary/10"
-                      : "bg-card border border-border text-foreground rounded-tl-none ring-1 ring-border/5"
+                      ? "bg-zinc-900 border border-white/10 text-zinc-100 rounded-tr-none"
+                      : "bg-[#131316] border border-cyan-500/20 text-zinc-100 rounded-tl-none shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-xl"
                   )}
                 >
                   {msg.text}
                 </div>
-                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium px-1">
-                  {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                <div className="flex items-center gap-2 px-1">
+                  <span className="text-[10px] text-zinc-600 font-bold uppercase tracking-tighter">
+                    {msg.sender === "user" ? "Direct Request" : "Agent Response"}
+                  </span>
+                  <span className="size-1 rounded-full bg-zinc-800" />
+                  <span className="text-[10px] text-zinc-500 font-medium">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
               </div>
             </div>
           ))}
 
           {isTyping && (
-            <div className="flex gap-4 animate-pulse">
-              <Avatar className="size-9 border border-border">
-                <AvatarFallback className="bg-muted text-muted-foreground">
-                  <Anchor className="size-5" />
-                </AvatarFallback>
-              </Avatar>
-              <div className="bg-muted/30 px-4 py-3 rounded-2xl rounded-tl-none border border-border/50 text-xs text-muted-foreground italic">
+            <div className="flex gap-5 animate-pulse">
+              <div className="size-10 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center shrink-0">
+                <Bot className="size-5 text-cyan-400" />
+              </div>
+              <div className="bg-cyan-500/[0.03] border border-cyan-500/10 px-5 py-3.5 rounded-3xl rounded-tl-none text-[13px] text-cyan-400/80 font-medium tracking-wide shadow-inner">
                 Agent is calculating trajectories...
               </div>
             </div>
@@ -125,28 +136,30 @@ export function ChatInterface() {
       </ScrollArea>
 
       {/* Input Area */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 md:p-6 bg-gradient-to-t from-background via-background/95 to-transparent pt-12">
-        <div className="max-w-3xl mx-auto relative group">
+      <div className="absolute bottom-0 left-0 right-0 px-6 pb-10 pt-20 bg-gradient-to-t from-[#050506] via-[#050506]/98 to-transparent">
+        <div className="max-w-4xl mx-auto relative group">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             disabled={!isConnected}
-            placeholder={isConnected ? "Type your command (e.g., 'deploy to staging' or 'check logs')..." : "Connecting to Helmsman Bridge..."}
-            className="h-14 pl-6 pr-16 bg-card/50 backdrop-blur-md border-border hover:border-primary/50 focus:border-primary/50 focus:ring-primary/20 transition-all rounded-2xl shadow-xl disabled:opacity-50"
+            placeholder={isConnected ? "Speak to the helmsman..." : "Re-establishing bridge connection..."}
+            className="h-16 pl-8 pr-20 bg-white/[0.03] backdrop-blur-3xl border-white/5 hover:border-cyan-500/30 focus:border-cyan-500/50 focus:ring-0 transition-all rounded-[24px] shadow-2xl text-[15px] placeholder:text-zinc-600 disabled:opacity-50"
           />
           <Button
             onClick={handleSend}
             disabled={!input.trim() || !isConnected}
             size="icon"
-            className="absolute right-2 top-2 size-10 rounded-xl transition-transform active:scale-95 disabled:scale-100 shadow-lg shadow-primary/20"
+            className="absolute right-3 top-3 size-10 rounded-xl bg-cyan-500 text-black hover:bg-cyan-400 transition-all active:scale-90 shadow-lg shadow-cyan-500/20"
           >
             <Send className="size-5" />
           </Button>
+          <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 text-[10px] font-bold text-zinc-600 uppercase tracking-[0.2em] whitespace-nowrap opacity-50 group-hover:opacity-100 transition-opacity">
+            <span>Orchestration Layer v1.0</span>
+            <span className="size-1 rounded-full bg-zinc-800" />
+            <span>Encrypted Tunnel Active</span>
+          </div>
         </div>
-        <p className="text-[10px] text-center mt-3 text-muted-foreground uppercase tracking-widest font-medium opacity-60">
-            Press <kbd className="px-1.5 py-0.5 rounded border border-border bg-muted/20 font-sans">Enter</kbd> to execute command
-        </p>
       </div>
     </div>
   )
