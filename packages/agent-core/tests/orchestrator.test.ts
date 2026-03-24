@@ -99,6 +99,18 @@ describe("HelmsmanOrchestrator", () => {
       expect(devopsAgent.generate).toHaveBeenCalledTimes(0);
     });
 
+    it("should instruct chat replies to stay truthful about current activity", async () => {
+      await orchestrator.handleMessage({
+        ...baseMessage,
+        text: "what are you doing?",
+      });
+
+      const generateCall = responderAgent.generate.mock.calls[0];
+      expect(generateCall?.[0]).toContain("Truthfulness is the top priority. Never lie, bluff, or make up details just to sound natural.");
+      expect(generateCall?.[0]).toContain("Do not invent personal activities, routines, coworkers, feelings, memories, or experiences that are not grounded in the provided context.");
+      expect(generateCall?.[0]).toContain("If asked what you are doing, feeling, or working on, answer only from the current chat context and your actual role here. If you do not know, say you do not know.");
+    });
+
     it("should block prompt injection override attempts before routing", async () => {
       const response = await orchestrator.handleMessage({
         ...baseMessage,
@@ -829,3 +841,4 @@ describe("HelmsmanOrchestrator", () => {
     });
   });
 });
+
