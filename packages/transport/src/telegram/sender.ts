@@ -1,3 +1,5 @@
+import { Api } from "grammy";
+
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 const escapeHtml = (value: string): string => {
@@ -19,17 +21,14 @@ const splitMessage = (message: string, chunkSize: number = TELEGRAM_MESSAGE_LIMI
 };
 
 export class TelegramSender {
-  private readonly botToken: string;
+  private readonly api: Api;
 
   public constructor(botToken: string) {
-    this.botToken = botToken;
+    this.api = new Api(botToken);
   }
 
   public async sendTyping(chatId: string): Promise<void> {
-    await this.callTelegram("sendChatAction", {
-      chat_id: Number(chatId),
-      action: "typing",
-    });
+    await this.api.sendChatAction(Number(chatId), "typing");
   }
 
   public async sendResponse(chatId: string, text: string): Promise<void> {
@@ -37,26 +36,9 @@ export class TelegramSender {
     const chunks = splitMessage(escaped);
 
     for (const chunk of chunks) {
-      await this.callTelegram("sendMessage", {
-        chat_id: Number(chatId),
-        text: chunk,
+      await this.api.sendMessage(Number(chatId), chunk, {
         parse_mode: "HTML",
       });
-    }
-  }
-
-  private async callTelegram(method: string, payload: Record<string, unknown>): Promise<void> {
-    const response = await fetch(`https://api.telegram.org/bot${this.botToken}/${method}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Telegram API ${method} failed: ${response.status} ${body}`);
     }
   }
 }

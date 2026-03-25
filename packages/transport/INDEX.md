@@ -10,7 +10,7 @@ Provides utilities for the API layer to parse incoming Telegram updates, format 
 src/
   telegram/
     parser.ts       ← Parses raw Telegram update payloads into internal message types
-    sender.ts       ← Formats and sends messages back to Telegram via HTTP API
+    sender.ts       ← Formats and sends messages back to Telegram via grammY API client
     commands.ts     ← Slash command detection and routing
     dedup.ts        ← Redis-backed message deduplication
     types.ts        ← Transport-level types
@@ -24,4 +24,4 @@ src/
 - `MessageDeduplicator` — Redis-backed dedup class
 
 ## Dependencies
-`@helmsman/shared`, `ioredis`
+`@helmsman/shared`, `grammy`, `ioredis`

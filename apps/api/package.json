@@ -16,6 +16,7 @@
     "@helmsman/shared": "*",
     "@helmsman/transport": "*",
     "express": "^5.2.1",
+    "grammy": "^1.38.2",
     "ioredis": "^5.10.0",
     "ws": "^8.19.0"
   },

@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@helmsman/shared": "*",
+    "grammy": "^1.38.2",
     "ioredis": "^5.10.0"
   },
   "devDependencies": {
