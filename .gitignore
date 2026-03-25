@@ -37,8 +37,29 @@ yarn-error.log*
 .DS_Store
 *.pem
 
-soul.md
+apps/api/data
+apps/api/tmp-test-data
+
+# soul.md
 
 logs
 *.log
-CAPABILITY_GATES.md
+# current-state
+# CAPABILITY_GATES.md
+# HELMSMAN_ROADMAP.md
+# HELMSMAN_ROAD.md
+# GCP_MCP_IMPLEMENTATION.md
+# AWS_MCP_PROMPT.md
+
+# *.md
+
+# schedules.json
+# cloudflare
+
+tmp-test-data
+# .agents
+
+
+----
+for me
+- create audit docs again   

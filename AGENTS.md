@@ -18,10 +18,6 @@ Full product context: `apps/docs/README.md`, `apps/docs/PRD.md`
 To explore and navigate the codebase, start with `apps/docs/MAP.md` — it has the full monorepo structure with all apps and packages listed with one-line descriptions. Before working on any package, read its `INDEX.md` first (e.g. `packages/agent-core/INDEX.md`) — it gives you the folder structure, key files, exports, dependencies so you can understand context and navigate fast. Keep both files up to date: update `MAP.md` when you add/remove packages or apps, and update the package's `INDEX.md` when you change files, exports inside it.
 
 
-
----
-
-
 ---
 
 ## Coding Conventions (Inline Summary)
@@ -44,12 +40,8 @@ Full reference: `apps/docs/CONVENTIONS.md`
 ### Environment Variables
 - Whenever you add or change any env var in a package, update that package's `.env.example` in the same PR.
 - `.env` files are local-only and must never be committed with real secrets.
-- Package READMEs must document required env vars and conditional requirements (e.g., provider-specific keys).
+- Package `INDEX.md` files must document required env vars and conditional requirements (e.g., provider-specific keys).
 
-### Prisma
-- Schema lives in `packages/db/prisma/schema.prisma`.
-- Never import `@prisma/client` directly — import the typed client from `@helmsman/db`.
-- All queries go through repository functions, never raw Prisma calls in route handlers.
 
 ### File Organization
 - One concept per file. Keep files under 300 LOC; split when larger.
@@ -98,24 +90,39 @@ Multiple agents may work on this codebase simultaneously. Follow these rules str
 
 8. **Communicate via contracts.** If you need something from another package that doesn't exist yet, create a typed interface in `@helmsman/shared` and use it. The other agent will implement it.
 
+### Git Safety and Atomic Commit Rules
+
+- Delete unused or obsolete files when your own changes make them irrelevant (refactors, feature removals, etc.).
+- Revert files only when the change is yours or explicitly requested.
+- Before attempting to delete a file to resolve a local type/lint failure, stop and ask the user for approval.
+- Never delete or revert another agent's in-progress work just to silence an error.
+- Never edit `.env` or any environment variable files; only the user may change them.
+- Coordinate with other agents before removing their in-progress edits.
+- Moving/renaming and restoring files is allowed when it does not discard another agent's work.
+- Never run destructive git operations unless there is explicit written instruction in this conversation.
+- Destructive operations include `git reset --hard`, `rm`, `git checkout`/`git restore` to an older commit, and similar rollback commands.
+- Never use `git restore` (or similar commands) to revert files you did not author; coordinate instead.
+- Always check `git status` before any commit.
+- Keep commits atomic and isolated: commit only the files you touched and pass each path explicitly.
+- For tracked files, use: `git commit -m "<scoped message>" -- path/to/file1 path/to/file2`.
+- For new files, use: `git restore --staged :/ && git add "path/to/file1" "path/to/file2" && git commit -m "<scoped message>" -- path/to/file1 path/to/file2`.
+- Quote any git paths containing brackets or parentheses so the shell does not treat them as globs or subshells.
+- When running rebase, avoid opening editors: export `GIT_EDITOR=:` and `GIT_SEQUENCE_EDITOR=:` (or pass `--no-edit`).
+- Never amend commits unless there is explicit written approval in the task thread.
+
 ---
 
 ## Feature Routing Table
 
 When assigned a feature, read `AGENTS.md` (this file) + the feature doc below:
 
-| Feature | Doc | Package(s) | Phase |
-|---------|-----|------------|-------|
-| Telegram Gateway | `apps/docs/features/TELEGRAM_GATEWAY.md` | `apps/api` | Wave 1 |
-| Data Layer | `apps/docs/features/DATA_LAYER.md` | `packages/db`, `packages/shared` | Wave 1 |
-| Tool System | `apps/docs/features/TOOL_SYSTEM.md` | `packages/tools` | Wave 1 |
-| Audit & Observability | `apps/docs/features/AUDIT_LOG.md` | `packages/audit` | Wave 1 |
-| Agent Core | `apps/docs/features/AGENT_CORE.md` | `packages/agent-core` | Wave 2 |
-| Policy Engine | `apps/docs/features/POLICY_ENGINE.md` | `packages/policy` | Wave 2 |
-| AWS Tools | `apps/docs/features/AWS_TOOLS.md` | `packages/tools-aws` | Wave 2 |
-
-**Wave 1** features have no internal dependencies — build in parallel.
-**Wave 2** features depend on Wave 1 contracts — build after Wave 1 merges.
+| Feature | Doc | Package(s) |
+|---------|-----|------------|
+| Agent Core | `apps/docs/features/AGENT_CORE.md` | `packages/agent-core` |
+| Audit & Observability | `apps/docs/features/AUDIT_LOG.md` | `packages/audit` |
+| Capability Gates | `apps/docs/features/CAPABILITY_GATES.md` | `packages/action-gateway` |
+| DevOps Runtime | `apps/docs/features/GIT_SSH_DEVOPS_RUNTIME.md` | `packages/tools-devops-runtime` |
+| Security Hardening | `apps/docs/features/SECURITY_HARDENING_PROGRAM.md` | `packages/agent-core` |
 
 ---
 
@@ -165,16 +172,3 @@ Skill policy: `apps/docs/AGENT_SKILLS.md`
 - [ ] No secrets, credentials, or hardcoded config values in code
 
 ---
-
-## Symlinks for Other Agents
-
-If using Claude Code or Claude-based agents, create a symlink:
-```bash
-# Unix/macOS
-ln -s AGENTS.md CLAUDE.md
-
-# Windows (PowerShell, run as admin)
-New-Item -ItemType SymbolicLink -Path CLAUDE.md -Target AGENTS.md
-```
-
-Copilot reads `AGENTS.md` natively. Codex reads `AGENTS.md` natively.

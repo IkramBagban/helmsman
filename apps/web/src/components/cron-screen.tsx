@@ -86,7 +86,7 @@ export function CronScreen() {
   const totalRuns = REAL_SCHEDULES.reduce((acc, s) => acc + s.runsCompleted, 0)
 
   return (
-    <div className="flex h-full flex-col bg-[#050508] text-zinc-100 selection:bg-cyan-500/30">
+    <div className="flex h-screen flex-col bg-[#050508] text-zinc-100 selection:bg-cyan-500/30">
       {/* Dynamic Glassmorphism Background Elements */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute top-[0%] right-[10%] w-[600px] h-[500px] rounded-[100%] bg-cyan-600/10 blur-[140px] mix-blend-screen opacity-60 animate-in fade-in duration-1000" />
@@ -98,16 +98,10 @@ export function CronScreen() {
         {/* Sleek App Header */}
         <header className="flex shrink-0 items-center justify-between border-b border-white/5 bg-[#0a0a0c]/80 px-8 py-6 backdrop-blur-2xl">
           <div className="flex items-center gap-8">
-            <div className="space-y-1.5 flex flex-col justify-center">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 border border-white/10 shadow-[0_0_20px_rgba(6,182,212,0.15)]">
-                  <Cpu className="size-5 text-cyan-400" />
-                </div>
-                <h1 className="text-2xl font-black tracking-tight text-white/90">
-                  Cron Engine
-                </h1>
-              </div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.25em] text-cyan-400/60 ml-12">Automated Operations</p>
+            <div className="flex items-center justify-center">
+              <h1 className="text-2xl font-black tracking-tight text-white/90">
+                Cron Engine
+              </h1>
             </div>
 
             <div className="h-12 w-px bg-white/10 mx-2" />
@@ -131,10 +125,6 @@ export function CronScreen() {
                 className="bg-transparent text-sm font-medium outline-none placeholder:text-zinc-600 w-56 transition-all focus:w-72 text-zinc-200"
               />
             </div>
-            <Button className="h-10 rounded-xl bg-gradient-to-b from-cyan-400 to-cyan-600 hover:from-cyan-300 hover:to-cyan-500 text-black font-extrabold shadow-[0_0_20px_rgba(6,182,212,0.25)] hover:shadow-[0_0_30px_rgba(6,182,212,0.4)] transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 active:scale-95 border border-cyan-300/50">
-              <Plus className="mr-2 size-4 stroke-[3px]" />
-              Create Job
-            </Button>
           </div>
         </header>
 
@@ -150,16 +140,6 @@ export function CronScreen() {
           </Tabs>
 
           <div className="flex items-center gap-3">
-            <Select defaultValue="newest">
-              <SelectTrigger className="h-9 w-[150px] border-white/10 bg-black/40 text-xs font-semibold text-zinc-300 rounded-xl hover:bg-white/5 transition-colors">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent className="bg-[#0f0f13] border-white/10 rounded-xl shadow-2xl backdrop-blur-2xl">
-                <SelectItem value="newest" className="focus:bg-white/5 font-medium">Newest First</SelectItem>
-                <SelectItem value="runs" className="focus:bg-white/5 font-medium">Most Executions</SelectItem>
-                <SelectItem value="alphabetical" className="focus:bg-white/5 font-medium">Alphabetical A-Z</SelectItem>
-              </SelectContent>
-            </Select>
             <Button variant="outline" size="icon" className="h-9 w-9 rounded-xl border-white/10 bg-black/40 text-zinc-400 hover:text-white hover:bg-white/10 hover:border-white/20 transition-all duration-300 active:scale-90">
               <RotateCcw className="size-3.5" />
             </Button>
@@ -167,7 +147,7 @@ export function CronScreen() {
         </div>
 
         {/* Feed Area */}
-        <main className="flex-1 overflow-y-auto p-8 custom-scrollbar relative z-0">
+        <main className="flex-1 min-h-0 overflow-y-auto p-8 custom-scrollbar relative z-0">
           <div className="max-w-[1400px] mx-auto space-y-4 pb-20">
             {filteredSchedules.length > 0 ? (
               <div className="grid grid-cols-1 gap-4">
@@ -177,14 +157,8 @@ export function CronScreen() {
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-40 text-center animate-in fade-in duration-700">
-                <div className="size-24 rounded-[2rem] bg-gradient-to-br from-white/5 to-white/0 flex items-center justify-center mb-6 border border-white/10 shadow-2xl shadow-black/50">
-                  <Terminal className="size-10 text-cyan-500/50" />
-                </div>
                 <h3 className="text-2xl font-bold bg-gradient-to-br from-white to-zinc-500 bg-clip-text text-transparent">No jobs matching criteria</h3>
                 <p className="text-zinc-500 mt-3 max-w-sm text-sm font-medium leading-relaxed">Adjust your filters or try a different search phrase to find what you're looking for.</p>
-                <Button className="mt-8 h-11 px-6 rounded-xl bg-white/5 text-white font-semibold hover:bg-white/10 border border-white/5 hover:border-white/10 transition-all">
-                  Clear Filters
-                </Button>
               </div>
             )}
           </div>
@@ -208,14 +182,6 @@ export function CronScreen() {
               </p>
             </div>
             <div className="flex items-center gap-4 text-xs font-semibold text-zinc-600">
-              <span className="hover:text-zinc-300 transition-colors cursor-pointer">API Specs</span>
-              <div className="h-3 w-px bg-white/10" />
-              <span className="hover:text-zinc-300 transition-colors cursor-pointer">Documentation</span>
-              <div className="h-3 w-px bg-white/10" />
-              <span className="flex items-center gap-1.5 text-cyan-500/70 hover:text-cyan-400 transition-colors">
-                <ShieldCheck className="size-3.5" />
-                Helmsman Core v2.4
-              </span>
             </div>
           </div>
         </footer>

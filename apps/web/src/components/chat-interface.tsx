@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Send, User, Anchor, Terminal, Bot } from "lucide-react"
+import { Send, User, Anchor, Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,7 +27,7 @@ export function ChatInterface() {
   }, [messages, isTyping])
 
   return (
-    <div className="flex flex-col h-full relative overflow-hidden bg-[#050506] text-zinc-100">
+    <div className="flex flex-col h-screen relative overflow-hidden bg-[#050506] text-zinc-100">
       {/* Background Glow */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute top-[-10%] left-[-5%] size-[500px] rounded-full bg-cyan-500/10 blur-[120px]" />
@@ -35,7 +35,7 @@ export function ChatInterface() {
       </div>
 
       {/* Header */}
-      <header className="flex items-center justify-between px-8 py-6 border-b border-white/5 bg-black/20 backdrop-blur-md sticky top-0 z-10">
+      <header className="flex shrink-0 items-center justify-between px-8 py-6 border-b border-white/5 bg-black/20 backdrop-blur-md z-10">
         <div className="flex items-center gap-4">
           <div className="relative">
             <div className="size-12 rounded-2xl bg-cyan-500/10 flex items-center justify-center border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.15)]">
@@ -48,29 +48,13 @@ export function ChatInterface() {
           </div>
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-white">Helmsman Bridge</h2>
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest font-bold text-zinc-500">
-                {isConnected ? (
-                  <>
-                    <span className="size-1.5 rounded-full bg-green-500 animate-pulse" />
-                    Secure Link Active
-                  </>
-                ) : "Terminal Offline"}
-              </span>
-            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" className="gap-2 h-9 rounded-xl border border-white/5 bg-white/5 transition-colors hover:bg-white/10 text-zinc-400">
-                <Terminal className="size-4" />
-                <span className="text-xs font-medium">Telemetry</span>
-            </Button>
         </div>
       </header>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 px-4 py-6 md:px-8 relative z-0" viewportRef={scrollRef}>
-        <div className="max-w-4xl mx-auto space-y-10 pb-40">
+      <ScrollArea className="flex-1 min-h-0 px-4 py-6 md:px-8 relative z-0" viewportRef={scrollRef}>
+        <div className="max-w-4xl mx-auto space-y-10 pb-10">
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20 text-center opacity-40">
               <Anchor className="size-16 mb-6 text-cyan-500/50" />
@@ -128,7 +112,7 @@ export function ChatInterface() {
                 <Bot className="size-5 text-cyan-400" />
               </div>
               <div className="bg-cyan-500/[0.03] border border-cyan-500/10 px-5 py-3.5 rounded-3xl rounded-tl-none text-[13px] text-cyan-400/80 font-medium tracking-wide shadow-inner">
-                Agent is calculating trajectories...
+                Agent is typing...
               </div>
             </div>
           )}
@@ -136,7 +120,7 @@ export function ChatInterface() {
       </ScrollArea>
 
       {/* Input Area */}
-      <div className="absolute bottom-0 left-0 right-0 px-6 pb-10 pt-20 bg-gradient-to-t from-[#050506] via-[#050506]/98 to-transparent">
+      <div className="shrink-0 relative z-10 px-6 pb-10 pt-6 bg-gradient-to-t from-[#050506] via-[#050506]/98 to-transparent">
         <div className="max-w-4xl mx-auto relative group">
           <Input
             value={input}
