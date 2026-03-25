@@ -13,98 +13,14 @@ Full product context: `apps/docs/README.md`, `apps/docs/PRD.md`
 
 ---
 
-## Monorepo Structure (Turborepo + Bun)
+## Navigation System
 
-```
-AGENTS.md                       ← you are here
-apps/
-  api/                          ← Express server: Telegram webhook + agent HTTP API
-  web/                          ← Next.js dashboard (future Phase 2)
-packages/
-  agent-core/                   ← LLM orchestration: intent → plan → execute loop
-  tools/                        ← Tool registry, base ToolInterface, sandbox
-  tools-aws/                    ← AWS tool implementations (EC2, S3, CloudWatch, Cost)
-  policy/                       ← Risk tiers, approval gates, permission checks
-  db/                           ← Prisma schema, client, migrations, seed
-  shared/                       ← Shared types, Zod schemas, errors, constants, utils
-  audit/                        ← Structured logging, audit events, trace context
-  eslint-config/                ← (existing) shared ESLint config
-  typescript-config/            ← (existing) shared tsconfig
-  ui/                           ← (existing) shared UI components
-apps/docs/
-  PRD.md                        ← Product requirements, user stories, MVP scope
-  STACK.md                      ← Tech stack decisions + package justifications
-  CONVENTIONS.md                ← Coding patterns, TypeScript, Zod, Prisma, testing
-  DATA_MODEL.md                 ← Database schema design (all Prisma models)
-  ARCHITECTURE.md               ← System design, data flow diagrams
-  ROADMAP.md                    ← Phased build plan
-  features/
-    README.md                   ← Feature index + dependency map + wave plan
-    TELEGRAM_GATEWAY.md         ← Telegram transport feature spec
-    AGENT_CORE.md               ← LLM orchestration feature spec
-    TOOL_SYSTEM.md              ← Tool registry feature spec
-    AWS_TOOLS.md                ← AWS tools feature spec
-    POLICY_ENGINE.md            ← Approval & permissions feature spec
-    DATA_LAYER.md               ← Database package feature spec
-    AUDIT_LOG.md                ← Audit trail feature spec
-```
+To explore and navigate the codebase, start with `apps/docs/MAP.md` — it has the full monorepo structure with all apps and packages listed with one-line descriptions. Before working on any package, read its `INDEX.md` first (e.g. `packages/agent-core/INDEX.md`) — it gives you the folder structure, key files, exports, dependencies so you can understand context and navigate fast. Keep both files up to date: update `MAP.md` when you add/remove packages or apps, and update the package's `INDEX.md` when you change files, exports inside it.
+
+
 
 ---
 
-## Tech Stack (Quick Reference)
-
-| Layer | Choice | Notes |
-|-------|--------|-------|
-| Runtime | Bun | Package manager + runtime + test runner |
-| Language | TypeScript 5.9+ | Strict mode, no `any` |
-| Monorepo | Turborepo | Task orchestration, caching |
-| API framework | Express | Mature, huge ecosystem, runs on Bun |
-| Validation | Zod | All external input validated at boundaries |
-| Database | PostgreSQL | Via Supabase or self-hosted |
-| ORM | Prisma | Schema-first, typed client |
-| LLM | Anthropic Claude (primary) | OpenAI + Gemini as fallback. Custom provider layer, no framework. |
-| Chat transport | Telegram Bot API (grammY) | Phase 1; Slack Phase 2 |
-| Cloud target | AWS | First-class; multi-cloud later |
-
-Full stack decisions: `apps/docs/STACK.md`
-
----
-
-## Build, Dev, and Test Commands
-
-```bash
-# Install dependencies
-bun install
-
-# Dev (all apps, watch mode)
-bun run dev
-
-# Build
-bun run build
-
-# Type check
-bun run check-types
-
-# Lint
-bun run lint
-
-# Format
-bunx prettier --write "**/*.{ts,tsx,md}"
-
-# Test (single package)
-cd packages/agent-core && bun test
-
-# Test (all)
-bun run test
-
-# Database
-cd packages/db && bunx prisma generate
-cd packages/db && bunx prisma migrate dev
-cd packages/db && bunx prisma studio
-
-# Add a package dependency
-cd packages/shared && bun add zod
-```
 
 ---
 
@@ -207,12 +123,12 @@ When assigned a feature, read `AGENTS.md` (this file) + the feature doc below:
 
 | Doc | When to read |
 |-----|-------------|
+| `apps/docs/MAP.md` | When orienting in the codebase or locating a file |
+| `<pkg>/INDEX.md` | Before touching any package — always |
 | `apps/docs/CONVENTIONS.md` | Before writing any code |
-| `apps/docs/STACK.md` | When choosing a library or pattern |
 | `apps/docs/DATA_MODEL.md` | When touching the database or any model |
 | `apps/docs/PRD.md` | When you need product context for a decision |
 | `apps/docs/ARCHITECTURE.md` | When you need system-level understanding |
-| `apps/docs/ROADMAP.md` | When deciding what's in scope for MVP |
 | `apps/docs/TRUST_AND_PERMISSIONS.md` | When implementing anything security-related |
 | `apps/docs/AGENT_DESIGN.md` | When implementing the agent reasoning loop |
 

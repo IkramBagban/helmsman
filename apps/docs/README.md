@@ -42,7 +42,7 @@ Current interface strategy: **Telegram first**, then Slack.
 | [TRUST_AND_PERMISSIONS.md](./TRUST_AND_PERMISSIONS.md) | Security model and approval gates |
 | [guides/](./guides/) | Specialized engineering guides (Memory, Skills, Examples, etc.) |
 | [archive/](./archive/) | Research notes, legacy plans, and outdated specs |
-| [features/](./features/) | Folder for active/new feature specifications |
+| [features/](./features/) | Folder for active/new feature specifications (e.g. Audit Log) |
 
 ---
 
