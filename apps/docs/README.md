@@ -34,22 +34,17 @@ Current interface strategy: **Telegram first**, then Slack.
 
 | File | What's in it |
 |------|-------------|
-| [FEATURES.md](./FEATURES.md) | Full breakdown of every capability |
-| [EXAMPLES.md](./EXAMPLES.md) | Real conversation examples across 15+ scenarios |
+| [PRD.md](./PRD.md) | Product Requirements Document |
+| [STACK.md](./STACK.md) | Tech stack decisions and package justifications |
+| [CONVENTIONS.md](./CONVENTIONS.md) | Coding conventions, TypeScript, Zod, Prisma |
+| [DATA_MODEL.md](./DATA_MODEL.md) | Database schema design |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | How it's built, system design, data flow |
+| [ROADMAP.md](./ROADMAP.md) | What to build first, second, and later |
 | [TRUST_AND_PERMISSIONS.md](./TRUST_AND_PERMISSIONS.md) | Permission model, approval flows, safety design |
 | [AGENT_DESIGN.md](./AGENT_DESIGN.md) | How the AI reasons, plans, and executes |
-| [BEST_PRACTICES.md](./BEST_PRACTICES.md) | How the agent enforces best practices automatically |
-| [CHALLENGES.md](./CHALLENGES.md) | Hard problems and honest solutions |
-| [ROADMAP.md](./ROADMAP.md) | What to build first, second, and later |
-| [MAP.md](./MAP.md) | Canonical repository map: where features/files live |
-| [plans/INDEX.md](./plans/INDEX.md) | Active implementation plans + templates |
-| [plans/AI_PERSISTENT_MEMORY_PLAN.md](./plans/AI_PERSISTENT_MEMORY_PLAN.md) | Persistent-memory operating plan for AI agents |
-| [AGENT_SKILLS.md](./AGENT_SKILLS.md) | Industry patterns for skills + Helmsman skill architecture |
-| [agents/AGENT.md](./agents/AGENT.md) | Single entrypoint for coding agents (Codex/Antigravity/etc.) |
-| [agents/CONVENTIONS.md](./agents/CONVENTIONS.md) | Shared implementation conventions (no duplication) |
-| [features/README.md](./features/README.md) | Parallel feature specs for multi-agent implementation |
-| [COMPETITIVE_LANDSCAPE.md](./COMPETITIVE_LANDSCAPE.md) | What exists today and why this is different |
+| [features/](./features/) | Specs for Waves/Features |
+| [guides/](./guides/) | Engineering guides (AI Quality, Context, Skills, etc.) |
+| [archive/](./archive/) | Outdated plans, competitive landscape, UI specs, challenges |
 
 ---
 
