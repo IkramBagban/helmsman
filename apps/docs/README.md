@@ -35,16 +35,14 @@ Current interface strategy: **Telegram first**, then Slack.
 | File | What's in it |
 |------|-------------|
 | [PRD.md](./PRD.md) | Product Requirements Document |
-| [STACK.md](./STACK.md) | Tech stack decisions and package justifications |
-| [CONVENTIONS.md](./CONVENTIONS.md) | Coding conventions, TypeScript, Zod, Prisma |
-| [DATA_MODEL.md](./DATA_MODEL.md) | Database schema design |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | How it's built, system design, data flow |
-| [ROADMAP.md](./ROADMAP.md) | What to build first, second, and later |
-| [TRUST_AND_PERMISSIONS.md](./TRUST_AND_PERMISSIONS.md) | Permission model, approval flows, safety design |
-| [AGENT_DESIGN.md](./AGENT_DESIGN.md) | How the AI reasons, plans, and executes |
-| [features/](./features/) | Specs for Waves/Features |
-| [guides/](./guides/) | Engineering guides (AI Quality, Context, Skills, etc.) |
-| [archive/](./archive/) | Outdated plans, competitive landscape, UI specs, challenges |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, data flow, and architecture |
+| [CONVENTIONS.md](./CONVENTIONS.md) | Coding conventions and project standards |
+| [DATA_MODEL.md](./DATA_MODEL.md) | Database schema and model design |
+| [AGENT_DESIGN.md](./AGENT_DESIGN.md) | Agent reasoning, planning, and execution loop |
+| [TRUST_AND_PERMISSIONS.md](./TRUST_AND_PERMISSIONS.md) | Security model and approval gates |
+| [guides/](./guides/) | Specialized engineering guides (Memory, Skills, Examples, etc.) |
+| [archive/](./archive/) | Research notes, legacy plans, and outdated specs |
+| [features/](./features/) | Folder for active/new feature specifications |
 
 ---
 
