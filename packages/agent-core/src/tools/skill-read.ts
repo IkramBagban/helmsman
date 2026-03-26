@@ -1,17 +1,18 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 
-import { SKILL_CATALOG } from "../skills/catalog.js";
+import { getSkillCatalog } from "../skills/catalog.js";
 import { tryLoadSkillDoc } from "../skills/loader.js";
 import { logTrace, previewText } from "../trace-logger.js";
 
 const resolveSkillPath = (skill: string): string | null => {
+  const catalog = getSkillCatalog();
   const needle = skill.trim().toLowerCase();
   if (needle.length === 0) {
     return null;
   }
 
-  const matched = SKILL_CATALOG.find((entry) => {
+  const matched = catalog.find((entry) => {
     return (
       entry.id.toLowerCase() === needle ||
       entry.name.toLowerCase() === needle ||
@@ -51,7 +52,7 @@ export const skillReadTool = createTool({
 
     const resolvedPath = resolveSkillPath(requestedSkill);
     if (!resolvedPath) {
-      const availableSkills = SKILL_CATALOG.map((entry) => entry.id);
+      const availableSkills = getSkillCatalog().map((entry) => entry.id);
       logTrace(
         "tool.skill_read.completed",
         {
