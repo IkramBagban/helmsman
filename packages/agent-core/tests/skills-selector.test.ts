@@ -14,15 +14,18 @@ describe("selectSkillsForMessage", () => {
     ).toBe(true);
   });
 
-  it("should keep only always-on skill when message is irrelevant", () => {
+  it("should keep only always-on skill when message is a greeting", () => {
     const selected = selectSkillsForMessage("hi there");
     expect(selected.map((entry) => entry.skill.id)).toContain(
       "core-truthfulness",
     );
-    expect(selected.length).toBeGreaterThanOrEqual(1);
+    const dynamicCount = selected.filter(
+      (entry) => entry.skill.alwaysOn !== true,
+    ).length;
+    expect(dynamicCount).toBe(0);
   });
 
-  it("should select the highest-priority relevant skills for mixed-domain requests", () => {
+  it("should include eligible dynamic skills for actionable mixed-domain requests", () => {
     const selected = selectSkillsForMessage(
       "schedule a daily AWS billing report and update DNS for api.example.com",
     );
@@ -33,9 +36,10 @@ describe("selectSkillsForMessage", () => {
     );
 
     expect(selectedIds).toContain("aws-operations");
-    expect(dynamicSelectedIds.length).toBe(MAX_DYNAMIC_SKILLS);
+    expect(dynamicSelectedIds.length).toBeGreaterThan(0);
+    expect(dynamicSelectedIds.length).toBeLessThanOrEqual(MAX_DYNAMIC_SKILLS);
     expect(dynamicSelectedIds).toContain("scheduling");
-    expect(dynamicSelectedIds).not.toContain("dns");
+    expect(dynamicSelectedIds).toContain("dns-knowledge-base");
   });
 
   it("should cap dynamic skills to the configured maximum", () => {
@@ -60,7 +64,7 @@ describe("buildSkillContext", () => {
     expect(context).toContain("<available_skills>");
     expect(context).toContain("<name>aws-operations</name>");
     expect(context).toContain("<name>scheduling</name>");
-    expect(context).toContain("call `skill_read`");
+    expect(context).toContain("You MUST choose one catalog skill and call `skill_read`");
     expect(context).not.toContain("## Workflow");
   });
 
@@ -69,13 +73,12 @@ describe("buildSkillContext", () => {
     expect(context).toBe("");
   });
 
-  it("should include only matching dynamic skills in the catalog", () => {
+  it("should include eligible skills in the catalog for actionable messages", () => {
     const context = buildSkillContext("list all my ec2 instances");
 
     expect(context).toContain("<name>aws-operations</name>");
-    expect(context).toContain("<always>false</always>");
-    expect(context).not.toContain("<name>scheduling</name>");
-    expect(context).not.toContain("<name>dns</name>");
+    expect(context).toContain("<name>scheduling</name>");
+    expect(context).toContain("<name>dns-knowledge-base</name>");
     expect(context).not.toContain("<name>core-truthfulness</name>");
   });
 });
