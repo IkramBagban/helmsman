@@ -10,7 +10,7 @@
  */
 
 import { Agent } from "@mastra/core/agent";
-import { getAgentSoul, getAgentSoulPath } from "../agent/soul.js";
+import { getAgentSoul, getAgentSoulPath } from "./soul.js";
 // ---------------------------------------------------------------------------
 // System instructions for the DevOps agent
 // ---------------------------------------------------------------------------
