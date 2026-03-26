@@ -1,4 +1,4 @@
-import { MessageSquare, Calendar, Anchor } from "lucide-react"
+import { Anchor } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -13,25 +13,12 @@ import {
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 
-interface AppSidebarProps {
-  readonly screen: "chat" | "cron"
-  readonly onScreenChange: (screen: "chat" | "cron") => void
-}
+import { Link, useLocation } from "react-router-dom"
+import { NAV_ITEMS } from "@/nav"
 
-const items = [
-  {
-    title: "Chat",
-    screen: "chat" as const,
-    icon: MessageSquare,
-  },
-  {
-    title: "Cron Jobs",
-    screen: "cron" as const,
-    icon: Calendar,
-  },
-]
-
-export function AppSidebar({ screen, onScreenChange }: AppSidebarProps) {
+export function AppSidebar() {
+  const location = useLocation()
+  
   return (
     <Sidebar collapsible="icon" className="border-r border-white/5 bg-[#08080a] select-none">
       <SidebarHeader className="flex flex-row items-center gap-4 px-6 py-8">
@@ -48,23 +35,25 @@ export function AppSidebar({ screen, onScreenChange }: AppSidebarProps) {
           <SidebarGroupLabel className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-600 px-3 mb-4">Command Post</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-2">
-              {items.map((item) => (
+              {NAV_ITEMS.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
-                    isActive={screen === item.screen}
+                    asChild
+                    isActive={location.pathname === item.href}
                     tooltip={item.title}
-                    onClick={() => onScreenChange(item.screen)}
                     className={cn(
                         "h-12 rounded-2xl px-4 transition-all duration-300",
-                        screen === item.screen 
+                        location.pathname === item.href 
                             ? "bg-white/5 text-cyan-400 border border-white/5 shadow-inner" 
                             : "text-zinc-500 hover:text-white hover:bg-white/[0.02]"
                     )}
                   >
-                    <span className="flex items-center gap-4">
-                      <item.icon className={cn("size-5", screen === item.screen ? "text-cyan-400" : "text-zinc-600")} />
-                      <span className="font-medium text-[15px]">{item.title}</span>
-                    </span>
+                    <Link to={item.href}>
+                      <span className="flex items-center gap-4">
+                        <item.icon className={cn("size-5", location.pathname === item.href ? "text-cyan-400" : "text-zinc-600")} />
+                        <span className="font-medium text-[15px]">{item.title}</span>
+                      </span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
