@@ -7,8 +7,6 @@ import type {
   SkillEligibility,
 } from "./types.js";
 
-const MAX_FALLBACK_DYNAMIC_SKILLS = 1;
-
 const binaryAvailabilityCache = new Map<string, boolean>();
 
 interface SkillScore {
@@ -115,17 +113,12 @@ const scoreCatalog = (userMessage: string): readonly ScoredSkill[] => {
 const selectDynamicCandidates = (
   scored: readonly ScoredSkill[],
 ): readonly ScoredSkill[] => {
-  const eligibleDynamic = scored
+  const matchedDynamic = scored
     .filter((entry) => !entry.skill.alwaysOn && entry.eligibility.eligible)
+    .filter((entry) => entry.matchCount > 0)
     .sort((a, b) => b.score - a.score);
 
-  const matchedDynamic = eligibleDynamic.filter((entry) => entry.matchCount > 0);
-  const dynamicPool =
-    matchedDynamic.length > 0
-      ? matchedDynamic
-      : eligibleDynamic.slice(0, MAX_FALLBACK_DYNAMIC_SKILLS);
-
-  return dynamicPool.slice(0, MAX_DYNAMIC_SKILLS);
+  return matchedDynamic.slice(0, MAX_DYNAMIC_SKILLS);
 };
 
 const buildSelectedSkill = (
@@ -148,7 +141,6 @@ const buildSelectedSkill = (
 
 const buildCatalogItem = (
   entry: ScoredSkill,
-  recommendedIds: ReadonlySet<string>,
 ): string => {
   const { skill, eligibility } = entry;
   const location = `skills/${skill.skillPath}/SKILL.md`;
@@ -171,7 +163,6 @@ const buildCatalogItem = (
     `  <always>${skill.alwaysOn === true ? "true" : "false"}</always>`,
     `  <status>${eligibility.eligible ? "eligible" : "unavailable"}</status>`,
     `  <why>${reasons}</why>`,
-    `  <recommended>${recommendedIds.has(skill.id) ? "true" : "false"}</recommended>`,
     "</skill>",
   ].join("\n");
 };
@@ -193,33 +184,33 @@ export function selectSkillsForMessage(
 
 export function buildSkillContext(userMessage: string): string {
   const scored = scoreCatalog(userMessage);
-  const dynamicRecommended = selectDynamicCandidates(scored).map(
-    (entry) => entry.skill.id,
-  );
+  const shortlisted = selectDynamicCandidates(scored);
+  if (shortlisted.length === 0) {
+    return "";
+  }
 
-  const recommendedIds = new Set<string>(dynamicRecommended);
-
-  const catalog = scored
-    .map((entry) => buildCatalogItem(entry, recommendedIds))
+  const catalog = shortlisted
+    .map((entry) => buildCatalogItem(entry))
     .join("\n");
 
-  const recommendedList = Array.from(recommendedIds)
+  const shortlistedList = shortlisted
+    .map((entry) => entry.skill.id)
     .map((id) => `- ${id}`)
     .join("\n");
 
   return [
     "## Skills (mandatory)",
-    "Before acting: scan <available_skills> entries and identify non-always skills with <recommended>true</recommended> and <status>eligible</status>.",
-    "- If one or more such skills exist, you MUST call `skill_read` for the most specific one before calling any non-skill tool.",
-    "- Only skip `skill_read` when no non-always skill is both recommended and eligible.",
+    "Before acting: this catalog already contains only relevant, eligible non-always skills for this request.",
+    "- You MUST call `skill_read` for one skill from this list before calling any non-skill tool.",
+    "- If there is exactly one skill listed, read that skill.",
+    "- If multiple are listed, read the most specific one first.",
     "- Read at most one skill up front; read additional skills only if the first is insufficient.",
-    "- Always-on skills are baseline policy and do not require a `skill_read` call.",
     "",
     "<available_skills>",
     catalog,
     "</available_skills>",
     "",
-    "Selector recommendations (non-binding):",
-    recommendedList.length > 0 ? recommendedList : "- none",
+    "Shortlisted skills:",
+    shortlistedList,
   ].join("\n");
 }

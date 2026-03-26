@@ -59,16 +59,23 @@ describe("buildSkillContext", () => {
     expect(context).toContain("## Skills (mandatory)");
     expect(context).toContain("<available_skills>");
     expect(context).toContain("<name>aws-operations</name>");
+    expect(context).toContain("<name>scheduling</name>");
     expect(context).toContain("call `skill_read`");
     expect(context).not.toContain("## Workflow");
   });
 
-  it("should recommend non-always skills for on-demand reads", () => {
+  it("should return empty skill context when no dynamic skill matches", () => {
+    const context = buildSkillContext("hi");
+    expect(context).toBe("");
+  });
+
+  it("should include only matching dynamic skills in the catalog", () => {
     const context = buildSkillContext("list all my ec2 instances");
 
     expect(context).toContain("<name>aws-operations</name>");
     expect(context).toContain("<always>false</always>");
-    expect(context).toContain("<recommended>true</recommended>");
-    expect(context).not.toContain("- core-truthfulness");
+    expect(context).not.toContain("<name>scheduling</name>");
+    expect(context).not.toContain("<name>dns</name>");
+    expect(context).not.toContain("<name>core-truthfulness</name>");
   });
 });
