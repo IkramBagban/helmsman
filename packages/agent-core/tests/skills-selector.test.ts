@@ -62,4 +62,13 @@ describe("buildSkillContext", () => {
     expect(context).toContain("call `skill_read`");
     expect(context).not.toContain("## Workflow");
   });
+
+  it("should recommend non-always skills for on-demand reads", () => {
+    const context = buildSkillContext("list all my ec2 instances");
+
+    expect(context).toContain("<name>aws-operations</name>");
+    expect(context).toContain("<always>false</always>");
+    expect(context).toContain("<recommended>true</recommended>");
+    expect(context).not.toContain("- core-truthfulness");
+  });
 });

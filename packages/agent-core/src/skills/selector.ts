@@ -168,6 +168,7 @@ const buildCatalogItem = (
     `  <name>${skill.name}</name>`,
     `  <description>${skill.description}</description>`,
     `  <location>${location}</location>`,
+    `  <always>${skill.alwaysOn === true ? "true" : "false"}</always>`,
     `  <status>${eligibility.eligible ? "eligible" : "unavailable"}</status>`,
     `  <why>${reasons}</why>`,
     `  <recommended>${recommendedIds.has(skill.id) ? "true" : "false"}</recommended>`,
@@ -192,17 +193,11 @@ export function selectSkillsForMessage(
 
 export function buildSkillContext(userMessage: string): string {
   const scored = scoreCatalog(userMessage);
-  const alwaysOnEligible = scored
-    .filter((entry) => entry.skill.alwaysOn && entry.eligibility.eligible)
-    .map((entry) => entry.skill.id);
   const dynamicRecommended = selectDynamicCandidates(scored).map(
     (entry) => entry.skill.id,
   );
 
-  const recommendedIds = new Set<string>([
-    ...alwaysOnEligible,
-    ...dynamicRecommended,
-  ]);
+  const recommendedIds = new Set<string>(dynamicRecommended);
 
   const catalog = scored
     .map((entry) => buildCatalogItem(entry, recommendedIds))
@@ -214,11 +209,11 @@ export function buildSkillContext(userMessage: string): string {
 
   return [
     "## Skills (mandatory)",
-    "Before replying: scan <available_skills> entries and decide relevance from descriptions.",
-    "- If exactly one skill clearly applies: call `skill_read` for that skill, then follow it.",
-    "- If multiple could apply: choose the most specific one, call `skill_read` for it first, then proceed.",
-    "- If none clearly apply: do not call `skill_read`.",
-    "Constraints: read at most one skill up front; only read additional skills if needed after first result.",
+    "Before acting: scan <available_skills> entries and identify non-always skills with <recommended>true</recommended> and <status>eligible</status>.",
+    "- If one or more such skills exist, you MUST call `skill_read` for the most specific one before calling any non-skill tool.",
+    "- Only skip `skill_read` when no non-always skill is both recommended and eligible.",
+    "- Read at most one skill up front; read additional skills only if the first is insufficient.",
+    "- Always-on skills are baseline policy and do not require a `skill_read` call.",
     "",
     "<available_skills>",
     catalog,
