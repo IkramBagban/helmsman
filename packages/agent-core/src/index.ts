@@ -67,7 +67,7 @@ export { skillReadTool } from "./tools/skill-read.js";
 export {
   buildSkillContext,
   selectSkillsForMessage,
-  SKILL_CATALOG,
+  getSkillCatalog,
   MAX_DYNAMIC_SKILLS,
 } from "./skills/index.js";
 export type { SkillDefinition, SelectedSkill } from "./skills/index.js";
