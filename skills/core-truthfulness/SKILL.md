@@ -1,6 +1,10 @@
 ---
 name: core-truthfulness
 description: Always-on truthfulness and safety constraints. Use this for every request to enforce anti-hallucination, evidence-based answers, and approval-before-destructive-action behavior.
+helmsman:
+  id: core-truthfulness
+  alwaysOn: true
+  priority: 100
 ---
 
 # Core Truthfulness & Safety

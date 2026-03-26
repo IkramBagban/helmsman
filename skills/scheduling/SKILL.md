@@ -1,6 +1,23 @@
 ---
 name: scheduling
 description: Scheduling and reminder workflow skill. Use this whenever the user asks to schedule, remind, run checks later, configure recurring tasks, or pause/resume/cancel schedules.
+helmsman:
+  id: scheduling
+  priority: 85
+  keywords:
+    - schedule
+    - scheduling
+    - remind
+    - reminder
+    - cron
+    - timer
+    - every
+    - daily
+    - weekly
+    - monthly
+    - pause
+    - resume
+    - cancel
 ---
 
 # Scheduling & Reminders

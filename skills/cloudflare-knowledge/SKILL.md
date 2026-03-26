@@ -1,6 +1,27 @@
 ---
 name: cloudflare-knowledge
 description: "Comprehensive Cloudflare knowledge base for Helmsman. Covers DNS provider setup, API token configuration, environment variables, supported operations, and troubleshooting."
+helmsman:
+  id: dns
+  priority: 80
+  keywords:
+    - dns
+    - domain
+    - subdomain
+    - record
+    - zone
+    - ttl
+    - nameserver
+    - cloudflare
+    - namecheap
+    - txt
+    - mx
+    - cname
+    - a record
+    - aaaa
+  requires:
+    env:
+      - CLOUDFLARE_API_TOKEN
 ---
 
 # Cloudflare Knowledge Base

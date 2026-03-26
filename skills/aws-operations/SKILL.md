@@ -1,6 +1,22 @@
 ---
 name: aws-operations
-description: AWS operational workflow skill. Use this whenever the user asks about AWS services, cloud costs, IAM, EC2, S3, EKS, Kubernetes-on-AWS, or account/resource state and changes.
+description: AWS operational workflow skill. Use this whenever the user asks about AWS services, cloud costs, IAM, EC2, S3, EKS, Kubernetes-on-AWS, or account/resource state and changes or anythign related to aws.
+helmsman:
+  id: aws-operations
+  priority: 90
+  keywords:
+    - aws
+    - ec2
+    - s3
+    - rds
+    - cloudfront
+    - cloudwatch
+    - iam
+    - route53
+    - billing
+    - cost
+    - eks
+    - kubernetes
 ---
 
 # AWS Operations
