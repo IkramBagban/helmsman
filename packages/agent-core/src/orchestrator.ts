@@ -156,6 +156,10 @@ export class HelmsmanOrchestrator {
           {
             ...message,
             text: scheduledPrompt,
+            metadata: {
+              ...message.metadata,
+              rawUserText: message.text,
+            },
           },
           {
             intent: "query",
@@ -465,3 +469,4 @@ export class HelmsmanOrchestrator {
   }
 
 }
+
