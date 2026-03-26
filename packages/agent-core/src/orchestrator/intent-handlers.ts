@@ -102,7 +102,7 @@ export async function handleQueryIntent(
     userId: message.userId,
     messageId: message.messageId,
     platform: message.platform,
-  });
+  }, typeof message.metadata?.rawUserText === "string" ? message.metadata.rawUserText : message.text);
   const result = await context.devopsAgent.generate(prompt, {
     maxSteps: MAX_STEPS,
   });
@@ -283,3 +283,4 @@ export async function handleMultiStepIntent(
     text: truncateForTelegram(executionResult.text, message.platform),
   };
 }
+

@@ -16,6 +16,7 @@ import { shellExecuteTool } from "./tools/shell-execute.js";
 import { createAwsKnowledgeTool } from "./tools/aws-knowledge.js";
 import { createMastraGitHubTools } from "./tools/github-tools.js";
 import { createMastraDevopsTools } from "./tools/devops-tools.js";
+import { skillReadTool } from "./tools/skill-read.js";
 import { createAwsProvider } from "@helmsman/tools-aws";
 import { createDnsProviderPackage } from "@helmsman/dns";
 import { HelmsmanOrchestrator } from "./orchestrator.js";
@@ -95,6 +96,7 @@ export async function createHelmsman(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Mastra tool types are covariant; safe to widen here
   const tools: Record<string, any> = {
     shell_execute: shellExecuteTool,
+    skill_read: skillReadTool,
     request_action: createRequestActionTool(capabilityStore),
   };
 
