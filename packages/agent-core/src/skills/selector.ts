@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-import { MAX_DYNAMIC_SKILLS, SKILL_CATALOG } from "./catalog.js";
+import { MAX_DYNAMIC_SKILLS, getSkillCatalog } from "./catalog.js";
 import type {
   SelectedSkill,
   SkillDefinition,
@@ -9,24 +9,28 @@ import type {
 
 const binaryAvailabilityCache = new Map<string, boolean>();
 
-interface SkillScore {
-  readonly score: number;
-  readonly matchCount: number;
-}
-
 interface ScoredSkill {
   readonly skill: SkillDefinition;
   readonly score: number;
-  readonly matchCount: number;
   readonly eligibility: SkillEligibility;
 }
-
-const tokenize = (text: string): readonly string[] => {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter((part) => part.length > 0);
-};
+const MAX_SKILL_CATALOG_CHARS = 8_000;
+const LOW_INTENT_MESSAGES = new Set([
+  "hi",
+  "hello",
+  "hey",
+  "yo",
+  "sup",
+  "thanks",
+  "thank you",
+  "ok",
+  "okay",
+  "cool",
+  "great",
+  "good morning",
+  "good afternoon",
+  "good evening",
+]);
 
 const hasBinary = (binary: string): boolean => {
   const cached = binaryAvailabilityCache.get(binary);
@@ -60,51 +64,32 @@ const evaluateSkillEligibility = (skill: SkillDefinition): SkillEligibility => {
   };
 };
 
-const scoreSkill = (
-  skill: SkillDefinition,
-  tokens: readonly string[],
-): SkillScore => {
-  if (skill.alwaysOn) {
-    return {
-      score: Number.POSITIVE_INFINITY,
-      matchCount: Number.POSITIVE_INFINITY,
-    };
+const isLikelyLowIntentMessage = (userMessage: string): boolean => {
+  const normalized = userMessage
+    .trim()
+    .toLowerCase()
+    .replace(/[!?.,]+/g, "");
+  if (LOW_INTENT_MESSAGES.has(normalized)) {
+    return true;
   }
 
-  let score = skill.priority;
-  let matchCount = 0;
-  const tokenSet = new Set(tokens);
-  const joined = tokens.join(" ");
-
-  for (const keyword of skill.keywords) {
-    const normalizedKeyword = keyword.toLowerCase();
-    if (normalizedKeyword.includes(" ")) {
-      if (joined.includes(normalizedKeyword)) {
-        score += 12;
-        matchCount += 1;
-      }
-      continue;
-    }
-
-    if (tokenSet.has(normalizedKeyword)) {
-      score += 10;
-      matchCount += 1;
-    }
+  const parts = normalized.split(/\s+/g).filter((part) => part.length > 0);
+  if (parts.length <= 3 && parts.every((part) => LOW_INTENT_MESSAGES.has(part) || part === "there")) {
+    return true;
   }
 
-  return { score, matchCount };
+  return false;
 };
 
 const scoreCatalog = (userMessage: string): readonly ScoredSkill[] => {
-  const tokens = tokenize(userMessage);
-
-  return SKILL_CATALOG.map((skill) => {
+  const lowIntent = isLikelyLowIntentMessage(userMessage);
+  const catalog = getSkillCatalog();
+  return catalog.map((skill) => {
     const eligibility = evaluateSkillEligibility(skill);
-    const score = scoreSkill(skill, tokens);
+    const score = lowIntent ? skill.priority - 1000 : skill.priority;
     return {
       skill,
-      score: score.score,
-      matchCount: score.matchCount,
+      score,
       eligibility,
     };
   });
@@ -113,12 +98,11 @@ const scoreCatalog = (userMessage: string): readonly ScoredSkill[] => {
 const selectDynamicCandidates = (
   scored: readonly ScoredSkill[],
 ): readonly ScoredSkill[] => {
-  const matchedDynamic = scored
+  const eligibleDynamic = scored
     .filter((entry) => !entry.skill.alwaysOn && entry.eligibility.eligible)
-    .filter((entry) => entry.matchCount > 0)
     .sort((a, b) => b.score - a.score);
 
-  return matchedDynamic.slice(0, MAX_DYNAMIC_SKILLS);
+  return eligibleDynamic.slice(0, MAX_DYNAMIC_SKILLS);
 };
 
 const buildSelectedSkill = (
@@ -167,50 +151,78 @@ const buildCatalogItem = (
   ].join("\n");
 };
 
+const buildCatalogWithBudget = (
+  shortlisted: readonly ScoredSkill[],
+): { readonly catalog: string; readonly omitted: number } => {
+  const items: string[] = [];
+  let totalChars = 0;
+  for (const entry of shortlisted) {
+    const item = buildCatalogItem(entry);
+    const nextLength = totalChars + item.length + 1;
+    if (nextLength > MAX_SKILL_CATALOG_CHARS) {
+      const omitted = shortlisted.length - items.length;
+      return {
+        catalog: items.join("\n"),
+        omitted,
+      };
+    }
+    items.push(item);
+    totalChars = nextLength;
+  }
+
+  return {
+    catalog: items.join("\n"),
+    omitted: 0,
+  };
+};
+
 export function selectSkillsForMessage(
   userMessage: string,
 ): readonly SelectedSkill[] {
   const scored = scoreCatalog(userMessage);
+  const lowIntent = isLikelyLowIntentMessage(userMessage);
 
   const alwaysOnSkills = scored
     .filter((entry) => entry.skill.alwaysOn && entry.eligibility.eligible)
     .map((entry) => buildSelectedSkill(entry.skill, entry.score, entry.eligibility));
 
-  const dynamicSkills = selectDynamicCandidates(scored)
-    .map((entry) => buildSelectedSkill(entry.skill, entry.score, entry.eligibility));
+  const dynamicSkills = lowIntent
+    ? []
+    : selectDynamicCandidates(scored)
+        .map((entry) => buildSelectedSkill(entry.skill, entry.score, entry.eligibility));
 
   return [...alwaysOnSkills, ...dynamicSkills];
 }
 
 export function buildSkillContext(userMessage: string): string {
+  if (isLikelyLowIntentMessage(userMessage)) {
+    return "";
+  }
+
   const scored = scoreCatalog(userMessage);
   const shortlisted = selectDynamicCandidates(scored);
   if (shortlisted.length === 0) {
     return "";
   }
 
-  const catalog = shortlisted
-    .map((entry) => buildCatalogItem(entry))
-    .join("\n");
+  const { catalog, omitted } = buildCatalogWithBudget(shortlisted);
 
-  const shortlistedList = shortlisted
-    .map((entry) => entry.skill.id)
-    .map((id) => `- ${id}`)
-    .join("\n");
+  if (catalog.length === 0) {
+    return "";
+  }
 
   return [
     "## Skills (mandatory)",
-    "Before acting: this catalog already contains only relevant, eligible non-always skills for this request.",
-    "- You MUST call `skill_read` for one skill from this list before calling any non-skill tool.",
-    "- If there is exactly one skill listed, read that skill.",
-    "- If multiple are listed, read the most specific one first.",
+    "Before acting: this catalog contains environment-eligible skills (name/description/location only).",
+    "- You MUST choose one catalog skill and call `skill_read` before any non-skill tool.",
+    "- Select the most relevant skill for the current request.",
     "- Read at most one skill up front; read additional skills only if the first is insufficient.",
+    omitted > 0
+      ? `- Catalog truncated for token budget: ${omitted} additional eligible skill(s) omitted.`
+      : "",
     "",
     "<available_skills>",
     catalog,
     "</available_skills>",
-    "",
-    "Shortlisted skills:",
-    shortlistedList,
   ].join("\n");
 }
